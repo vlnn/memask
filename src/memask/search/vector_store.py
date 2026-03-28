@@ -21,8 +21,10 @@ class VectorStore:
         self._ensure_table()
 
     def _ensure_table(self):
-        if EMBEDDINGS_TABLE not in self._db.list_tables():
+        try:
             self._db.create_table(EMBEDDINGS_TABLE, schema=self._schema)
+        except ValueError:
+            pass
 
     def _table(self):
         return self._db.open_table(EMBEDDINGS_TABLE)
@@ -58,7 +60,7 @@ class VectorStore:
         model_version: str | None = None,
     ) -> list[dict]:
         table = self._table()
-        query = table.search(query_vector.tolist(), vector_column_name="vector").limit(limit)
+        query = table.search(query_vector.tolist(), vector_column_name="vector").metric("cosine").limit(limit)
 
         if model_version:
             query = query.where(f"model_version = '{model_version}'")

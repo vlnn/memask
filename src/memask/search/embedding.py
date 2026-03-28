@@ -18,8 +18,29 @@ class EmbeddingService:
 
     def _load_model(self):
         if self._model is None:
+            import logging
+            import os
+            import warnings
+
+            os.environ["TOKENIZERS_PARALLELISM"] = "false"
+            os.environ["TRANSFORMERS_VERBOSITY"] = "error"
+            os.environ["TRANSFORMERS_NO_ADVISORY_WARNINGS"] = "1"
+            os.environ["HF_HUB_DISABLE_PROGRESS_BARS"] = "1"
+            os.environ["SAFETENSORS_LOG_LEVEL"] = "error"
+
+            for name in ("sentence_transformers", "transformers", "huggingface_hub", "safetensors"):
+                logging.getLogger(name).setLevel(logging.ERROR)
+            warnings.filterwarnings("ignore", module="transformers")
+
             from sentence_transformers import SentenceTransformer
-            self._model = SentenceTransformer(self._model_name)
+
+            try:
+                self._model = SentenceTransformer(
+                    self._model_name,
+                    local_files_only=True,
+                )
+            except OSError:
+                self._model = SentenceTransformer(self._model_name)
         return self._model
 
     def embed_one(self, text: str) -> np.ndarray:
