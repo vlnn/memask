@@ -3,6 +3,7 @@ import click
 from memask.db.connection import get_connection
 from memask.db.migrate import migrate_up
 from memask.repository import items, jobs
+from memask.repository.search import search_items
 
 
 @click.group()
@@ -17,14 +18,9 @@ def cli(ctx: click.Context, db: str | None) -> None:
 
 @cli.command()
 @click.argument("content")
-@click.option(
-    "--type",
-    "item_type",
-    default="note",
-    help="Item type: note, todo, url, decision, guide",
-)
+@click.option("--type", "item_type", default="note")
 @click.option("--title")
-@click.option("--status", default=None)
+@click.option("--status")
 @click.option("--priority", type=int)
 @click.option("--due-date")
 @click.option("--category")
@@ -82,16 +78,57 @@ def list_cmd(
         return
     for item in results:
         prefix = f"[{item.type}]"
-        deleted = " (deleted)" if item.deleted_at else ""
-        click.echo(f"{prefix} {item.content}{deleted}  ({item.id})")
+        if item.status:
+            prefix += f" ({item.status})"
+        click.echo(f"{prefix} {item.id}: {item.content}")
 
 
 @cli.command()
+@click.argument("query")
+@click.option("--type", "item_type")
+@click.option("--status")
+@click.option("--category")
+@click.option("--date-from")
+@click.option("--date-to")
+@click.option("--limit", default=20, type=int)
+@click.pass_context
+def search(
+    ctx: click.Context,
+    query: str,
+    item_type: str | None,
+    status: str | None,
+    category: str | None,
+    date_from: str | None,
+    date_to: str | None,
+    limit: int,
+) -> None:
+    results = search_items(
+        ctx.obj["conn"],
+        query,
+        type=item_type,
+        status=status,
+        category=category,
+        date_from=date_from,
+        date_to=date_to,
+        limit=limit,
+    )
+    if not results:
+        click.echo("No results found.")
+        return
+    for result in results:
+        item = result.item
+        prefix = f"[{item.type}]"
+        if item.status:
+            prefix += f" ({item.status})"
+        click.echo(f"{prefix} {item.id}: {item.content}")
+
+
+@cli.command("job-status")
 @click.pass_context
 def job_status(ctx: click.Context) -> None:
     stats = jobs.queue_status(ctx.obj["conn"])
     if not stats:
-        click.echo("Job queue is empty.")
+        click.echo("No jobs.")
         return
     for status, count in sorted(stats.items()):
         click.echo(f"{status}: {count}")

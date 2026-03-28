@@ -65,4 +65,4 @@ class TestListCommand:
 class TestJobStatusCommand:
     def test_empty_queue(self, run):
         result = run("job-status")
-        assert "empty" in result.output, "should report empty queue"
+        assert "No jobs" in result.output, "should report empty queue"

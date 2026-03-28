@@ -28,7 +28,7 @@ memask = "memask.cli:cli"
 
 
 [tool.pytest.ini_options]
-testpaths = ["tests"]
+testpaths = ["src/tests", "tests"]
 
 [tool.ruff]
 target-version = "py312"
