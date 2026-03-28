@@ -3,6 +3,7 @@ import click
 from memask.db.connection import get_connection
 from memask.db.migrate import migrate_up
 from memask.repository import items, jobs
+from memask.router.dispatcher import dispatch
 from memask.search.hybrid import hybrid_search
 from memask.search.keyword import keyword_search
 from memask.search.worker import enqueue_embedding, process_all_pending
@@ -30,7 +31,10 @@ def _get_embedder(ctx: click.Context):
 
 
 @click.group()
-@click.option("--db", default=None, help="Database path (default: ~/.memask/memask.db)")
+@click.option(
+    "--db", default=None,
+    help="Database path (default: ~/.memask/memask.db)",
+)
 @click.pass_context
 def cli(ctx: click.Context, db: str | None) -> None:
     ctx.ensure_object(dict)
@@ -38,6 +42,28 @@ def cli(ctx: click.Context, db: str | None) -> None:
     migrate_up(conn)
     ctx.obj["conn"] = conn
     ctx.obj["db_path"] = db
+
+
+@cli.command()
+@click.argument("text", nargs=-1, required=True)
+@click.pass_context
+def input(ctx: click.Context, text: tuple[str, ...]) -> None:
+    """Single input endpoint — routes to capture, search, todo, or command."""
+    joined = " ".join(text)
+    result = dispatch(ctx.obj["conn"], joined)
+
+    formatters = {
+        "captured": _format_captured,
+        "searched": _format_searched,
+        "todo_created": _format_todo_created,
+        "todo_listed": _format_todo_listed,
+        "todo_completed": _format_todo_completed,
+        "todo_not_found": _format_todo_not_found,
+        "app_command": _format_app_command,
+    }
+
+    formatter = formatters.get(result.action, _format_default)
+    formatter(result)
 
 
 @cli.command()
@@ -115,7 +141,10 @@ def list_cmd(
 @click.option("--status")
 @click.option("--category")
 @click.option("--limit", default=20, type=int)
-@click.option("--keyword-only", is_flag=True, help="Skip semantic search, keyword match only")
+@click.option(
+    "--keyword-only", is_flag=True,
+    help="Skip semantic search, keyword match only",
+)
 @click.pass_context
 def search(
     ctx: click.Context,
@@ -131,12 +160,14 @@ def search(
     if keyword_only:
         results = keyword_search(
             conn, query,
-            type=item_type, status=status, category=category, limit=limit,
+            type=item_type, status=status,
+            category=category, limit=limit,
         )
     else:
         results = hybrid_search(
             conn, _get_store(ctx), _get_embedder(ctx), query,
-            type=item_type, status=status, category=category, limit=limit,
+            type=item_type, status=status,
+            category=category, limit=limit,
         )
 
     if not results:
@@ -146,11 +177,10 @@ def search(
     for result in results:
         item = result.item
         score = f"{result.score:.3f}"
-        source = result.source
         prefix = f"[{item.type}]"
         if item.status:
             prefix += f" ({item.status})"
-        click.echo(f"{prefix} [{source} {score}] {item.id}: {item.content}")
+        click.echo(f"{prefix} [{score}] {item.id}: {item.content}")
 
 
 @cli.command("job-status")
@@ -177,7 +207,49 @@ def reindex(ctx: click.Context) -> None:
     result = on_startup(conn, store, embedder)
     click.echo(f"Recovered {result['stalled_recovered']} stalled jobs")
     click.echo(f"Removed {result['orphans_removed']} orphaned vectors")
-    click.echo(f"Enqueued {result['stale_reindex_enqueued']} items for reindexing")
+    click.echo(
+        f"Enqueued {result['stale_reindex_enqueued']} items for reindexing"
+    )
 
     processed = process_all_pending(conn, store, embedder)
     click.echo(f"Processed {processed} jobs")
+
+
+def _format_captured(result):
+    click.echo(f"Saved: {result.item.content}")
+
+
+def _format_searched(result):
+    if not result.items:
+        click.echo("No results found.")
+        return
+    for item in result.items:
+        click.echo(f"  [{item.type}] {item.id}: {item.content}")
+
+
+def _format_todo_created(result):
+    click.echo(f"Todo: {result.item.content}")
+
+
+def _format_todo_listed(result):
+    if not result.items:
+        click.echo("No pending todos.")
+        return
+    for todo in result.items:
+        click.echo(f"  [ ] {todo.id}: {todo.content}")
+
+
+def _format_todo_completed(result):
+    click.echo(f"Done: {result.item.content}")
+
+
+def _format_todo_not_found(result):
+    click.echo("No matching todo found.")
+
+
+def _format_app_command(result):
+    click.echo(f"Command: {result.command}")
+
+
+def _format_default(result):
+    click.echo(f"[{result.action}] OK")
