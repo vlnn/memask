@@ -1,10 +1,8 @@
 import numpy as np
 
-DEFAULT_MODEL = "all-MiniLM-L6-v2"
-
 
 class EmbeddingService:
-    def __init__(self, model_name: str = DEFAULT_MODEL):
+    def __init__(self, model_name: str = "all-MiniLM-L6-v2"):
         self._model_name = model_name
         self._model = None
 
@@ -16,39 +14,29 @@ class EmbeddingService:
     def dimension(self) -> int:
         return self._load_model().get_sentence_embedding_dimension()
 
-    def _load_model(self):
-        if self._model is None:
-            import logging
-            import os
-            import warnings
-
-            os.environ["TOKENIZERS_PARALLELISM"] = "false"
-            os.environ["TRANSFORMERS_VERBOSITY"] = "error"
-            os.environ["TRANSFORMERS_NO_ADVISORY_WARNINGS"] = "1"
-            os.environ["HF_HUB_DISABLE_PROGRESS_BARS"] = "1"
-            os.environ["SAFETENSORS_LOG_LEVEL"] = "error"
-
-            for name in ("sentence_transformers", "transformers", "huggingface_hub", "safetensors"):
-                logging.getLogger(name).setLevel(logging.ERROR)
-            warnings.filterwarnings("ignore", module="transformers")
-
-            from sentence_transformers import SentenceTransformer
-
-            try:
-                self._model = SentenceTransformer(
-                    self._model_name,
-                    local_files_only=True,
-                )
-            except OSError:
-                self._model = SentenceTransformer(self._model_name)
-        return self._model
-
     def embed_one(self, text: str) -> np.ndarray:
         model = self._load_model()
         return model.encode(text, normalize_embeddings=True)
 
     def embed_many(self, texts: list[str]) -> np.ndarray:
-        if not texts:
-            return np.array([])
         model = self._load_model()
         return model.encode(texts, normalize_embeddings=True)
+
+    def _load_model(self):
+        if self._model is None:
+            import logging
+            import os
+
+            os.environ["TOKENIZERS_PARALLELISM"] = "false"
+            for name in ("sentence_transformers", "transformers", "huggingface_hub"):
+                logging.getLogger(name).setLevel(logging.ERROR)
+
+            from sentence_transformers import SentenceTransformer
+
+            try:
+                self._model = SentenceTransformer(
+                    self._model_name, local_files_only=True
+                )
+            except OSError:
+                self._model = SentenceTransformer(self._model_name)
+        return self._model

@@ -1,7 +1,24 @@
-from dataclasses import dataclass, fields
-from sqlite3 import Row
+import sqlite3
+from dataclasses import dataclass
 
-_ITEM_FIELDS: set[str] = set()
+FIELDS = frozenset(
+    {
+        "id",
+        "type",
+        "content",
+        "title",
+        "status",
+        "priority",
+        "due_date",
+        "category",
+        "source",
+        "tags",
+        "created_at",
+        "updated_at",
+        "deleted_at",
+        "metadata",
+    }
+)
 
 
 @dataclass(frozen=True)
@@ -21,10 +38,8 @@ class Item:
     deleted_at: str | None
     metadata: str | None
 
-    @staticmethod
-    def from_row(row: Row) -> "Item":
-        global _ITEM_FIELDS
-        if not _ITEM_FIELDS:
-            _ITEM_FIELDS = {f.name for f in fields(Item)}
-        data = {k: v for k, v in dict(row).items() if k in _ITEM_FIELDS}
-        return Item(**data)
+    @classmethod
+    def from_row(cls, row: sqlite3.Row) -> "Item":
+        d = dict(row)
+        filtered = {k: v for k, v in d.items() if k in FIELDS}
+        return cls(**filtered)

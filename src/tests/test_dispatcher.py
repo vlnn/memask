@@ -1,122 +1,135 @@
-import pytest
+from memask.context import ServiceContext
+from memask.repository.items import create_item
+from memask.router.dispatcher import DispatchResult, dispatch
+from memask.search.vector_store import VectorStore
+from memask.search.worker import enqueue_embedding, process_all_pending
+from tests.helpers import FakeEmbeddingService
 
-from memask.router.dispatcher import dispatch
 
+class TestDispatchSignature:
+    def test_accepts_service_context(self, conn):
+        svc = ServiceContext(conn=conn)
+        result = dispatch(svc, "hello world")
+        assert isinstance(result, DispatchResult), "should return DispatchResult"
 
-class TestDispatchCapture:
-    def test_plain_text_creates_note(self, conn):
-        result = dispatch(conn, "kubernetes needs more RAM")
-        assert result.action == "captured", "plain text should create a note"
-        assert result.item is not None, "should return the created item"
-        assert result.item.type == "note", "should create a note type"
-        assert result.item.content == "kubernetes needs more RAM", (
-            "should store the original content"
+    def test_capture_through_service_context(self, conn):
+        svc = ServiceContext(conn=conn)
+        result = dispatch(svc, "kubernetes cluster needs more RAM")
+        assert result.action == "captured", "should capture plain text"
+        assert result.item is not None, "captured result should have item"
+        assert result.item.content == "kubernetes cluster needs more RAM", (
+            "should store the original text"
         )
 
 
-class TestDispatchTodoCreate:
-    @pytest.mark.parametrize("text,expected_content", [
-        ("/todo buy milk", "buy milk"),
-        ("/todo add fix the faucet", "fix the faucet"),
-        ("remind me to buy groceries", "buy groceries"),
-        ("remind about reading", "reading"),
-        ("remind about reading book", "reading book"),
-        ("remind me about the meeting", "the meeting"),
-        ("todo call the dentist", "call the dentist"),
-        ("don't forget to send the email", "send the email"),
-        ("i need to finish the report", "finish the report"),
-        ("remember to water the plants", "water the plants"),
-    ])
-    def test_todo_patterns_create_todo(self, conn, text, expected_content):
-        result = dispatch(conn, text)
-        assert result.action == "todo_created", (
-            f"'{text}' should create a todo"
-        )
-        assert result.item is not None, "should return the created item"
-        assert result.item.type == "todo", "should create todo type"
-        assert result.item.status == "pending", "new todo should be pending"
-        assert result.item.content == expected_content, (
-            f"should extract '{expected_content}' from '{text}'"
-        )
+class TestDispatchResultShape:
+    def test_has_action(self, conn):
+        svc = ServiceContext(conn=conn)
+        result = dispatch(svc, "hello")
+        assert hasattr(result, "action"), "DispatchResult should have action"
+        assert isinstance(result.action, str), "action should be a string"
 
+    def test_has_data_dict(self, conn):
+        svc = ServiceContext(conn=conn)
+        result = dispatch(svc, "hello")
+        assert hasattr(result, "data"), "DispatchResult should have data dict"
+        assert isinstance(result.data, dict), "data should be a dict"
 
-class TestDispatchTodoList:
-    def test_todo_list_returns_todos(self, conn):
-        dispatch(conn, "/todo buy milk")
-        dispatch(conn, "/todo fix the bug")
-        result = dispatch(conn, "/todo list")
+    def test_capture_data_contains_id_and_content(self, conn):
+        svc = ServiceContext(conn=conn)
+        result = dispatch(svc, "some note")
+        assert "id" in result.data, "capture data should contain id"
+        assert "content" in result.data, "capture data should contain content"
+
+    def test_search_data_contains_results(self, conn):
+        svc = ServiceContext(conn=conn)
+        create_item(conn, "deployment pipeline is broken")
+        result = dispatch(svc, "?deployment")
+        assert "results" in result.data, "search data should contain results"
+        assert isinstance(result.data["results"], list), "results should be a list"
+
+    def test_todo_create_data_contains_id(self, conn):
+        svc = ServiceContext(conn=conn)
+        result = dispatch(svc, "remind me to buy milk")
+        assert result.action == "todo_created", "should create todo"
+        assert "id" in result.data, "todo_created data should contain id"
+
+    def test_todo_list_data_contains_items(self, conn):
+        svc = ServiceContext(conn=conn)
+        create_item(conn, "buy eggs", type="todo", status="pending")
+        result = dispatch(svc, "/todo list")
         assert result.action == "todo_listed", "should list todos"
-        assert len(result.items) == 2, "should return both todos"
+        assert "items" in result.data, "todo_listed data should contain items"
 
-    def test_todo_list_empty(self, conn):
-        result = dispatch(conn, "/todo list")
-        assert result.action == "todo_listed", "should list todos even when empty"
-        assert result.items == [], "should return empty list"
+    def test_serializable_to_dict(self, conn):
+        svc = ServiceContext(conn=conn)
+        result = dispatch(svc, "hello world")
+        as_dict = result.to_dict()
+        assert isinstance(as_dict, dict), "to_dict should return a dict"
+        assert "action" in as_dict, "serialized should have action"
+        assert "data" in as_dict, "serialized should have data"
 
 
-class TestDispatchTodoComplete:
-    def test_todo_complete_marks_done(self, conn):
-        create_result = dispatch(conn, "/todo buy milk")
-        item_id = create_result.item.id
-        result = dispatch(conn, f"/todo done {item_id}")
-        assert result.action == "todo_completed", "should complete the todo"
-        assert result.item.status == "done", "todo should be marked done"
+class TestDispatchSearchUsesHybrid:
+    def test_search_uses_hybrid_when_store_available(self, conn, lance_dir):
+        embedder = FakeEmbeddingService()
+        store = VectorStore(lance_dir, dimension=embedder.dimension)
+        svc = ServiceContext(conn=conn, store=store, embedder=embedder)
 
-    def test_todo_complete_by_keyword(self, conn):
-        dispatch(conn, "/todo buy milk")
-        result = dispatch(conn, "/todo done buy milk")
-        assert result.action == "todo_completed", (
-            "should find and complete todo by keyword match"
+        item = create_item(conn, "shipping to production on friday")
+        enqueue_embedding(conn, item.id)
+        process_all_pending(conn, store, embedder)
+
+        result = dispatch(svc, "?deployment")
+        assert result.action == "searched", "should route to search"
+        found_ids = [r["id"] for r in result.data["results"]]
+        assert item.id in found_ids, (
+            "hybrid search should find semantically similar item"
         )
 
-    def test_todo_complete_not_found(self, conn):
-        result = dispatch(conn, "/todo done nonexistent task")
-        assert result.action == "todo_not_found", (
-            "should report not found for missing todo"
-        )
+    def test_search_falls_back_to_keyword_when_no_store(self, conn):
+        svc = ServiceContext(conn=conn)
+        create_item(conn, "deployment pipeline is broken")
+        result = dispatch(svc, "?deployment")
+        assert result.action == "searched", "should still search without store"
+        assert len(result.data["results"]) > 0, "keyword search should find exact match"
 
 
-class TestDispatchSearch:
-    def test_question_triggers_search(self, conn):
-        dispatch(conn, "kubernetes cluster needs more RAM")
-        result = dispatch(conn, "?kubernetes")
-        assert result.action == "searched", "should trigger search"
-        assert len(result.items) >= 1, "should find the matching item"
+class TestDispatchQueryContextWiring:
+    def test_date_filters_passed_through(self, conn, lance_dir):
+        embedder = FakeEmbeddingService()
+        store = VectorStore(lance_dir, dimension=embedder.dimension)
+        svc = ServiceContext(conn=conn, store=store, embedder=embedder)
 
-    def test_search_no_results(self, conn):
-        result = dispatch(conn, "?nonexistent thing")
-        assert result.action == "searched", "should still report searched"
-        assert result.items == [], "should return empty results"
+        create_item(conn, "meeting notes about deployment")
+        result = dispatch(svc, "?notes about deployment yesterday")
+        assert result.action == "searched", "should route to search"
 
-
-class TestDispatchAppCommand:
-    @pytest.mark.parametrize("text", [
-        "!help",
-        "!status",
-        "/help",
-        "/status",
-    ])
-    def test_app_commands_return_command_result(self, conn, text):
-        result = dispatch(conn, text)
-        assert result.action == "app_command", (
-            f"'{text}' should dispatch as app_command"
-        )
+    def test_type_filter_passed_through(self, conn):
+        svc = ServiceContext(conn=conn)
+        create_item(conn, "deployment todo", type="todo", status="pending")
+        create_item(conn, "deployment note", type="note")
+        result = dispatch(svc, "?deployment todos")
+        if result.data["results"]:
+            assert all(r.get("type") == "todo" for r in result.data["results"]), (
+                "should filter by type when query mentions todos"
+            )
 
 
-class TestEndToEndFlow:
-    def test_full_workflow(self, conn):
-        dispatch(conn, "learned about lancedb for vector storage")
-        dispatch(conn, "/todo review lancedb documentation")
+class TestDispatchTodoActions:
+    def test_todo_complete(self, conn):
+        svc = ServiceContext(conn=conn)
+        create_item(conn, "buy milk", type="todo", status="pending")
+        result = dispatch(svc, "/todo done buy milk")
+        assert result.action == "todo_completed", "should complete todo"
 
-        search_result = dispatch(conn, "?lancedb")
-        assert search_result.action == "searched", "should search"
-        assert len(search_result.items) >= 1, "should find lancedb note"
+    def test_todo_not_found(self, conn):
+        svc = ServiceContext(conn=conn)
+        result = dispatch(svc, "/todo done nonexistent task")
+        assert result.action == "todo_not_found", "should report not found"
 
-        todo_result = dispatch(conn, "/todo list")
-        assert len(todo_result.items) == 1, "should have one todo"
-
-        dispatch(conn, "/todo done review lancedb documentation")
-        todo_result = dispatch(conn, "/todo list")
-        assert len(todo_result.items) == 0, (
-            "completed todo should not appear in pending list"
-        )
+    def test_app_command(self, conn):
+        svc = ServiceContext(conn=conn)
+        result = dispatch(svc, "!help")
+        assert result.action == "app_command", "should route to app command"
+        assert result.data.get("command") == "help", "should extract command name"

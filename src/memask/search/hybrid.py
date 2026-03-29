@@ -1,39 +1,51 @@
 import sqlite3
 
-from memask.search.embedding import EmbeddingService
 from memask.search.keyword import SearchResult, keyword_search
 from memask.search.semantic import semantic_search
 from memask.search.vector_store import VectorStore
-
-DEFAULT_KEYWORD_WEIGHT = 0.4
-DEFAULT_SEMANTIC_WEIGHT = 0.6
 
 
 def hybrid_search(
     conn: sqlite3.Connection,
     vector_store: VectorStore,
-    embedding_service: EmbeddingService,
+    embedding_service,
     query: str,
     *,
     type: str | None = None,
-    category: str | None = None,
     status: str | None = None,
+    category: str | None = None,
+    date_from: str | None = None,
+    date_to: str | None = None,
+    keyword_weight: float = 0.4,
+    semantic_weight: float = 0.6,
     limit: int = 20,
-    keyword_weight: float = DEFAULT_KEYWORD_WEIGHT,
-    semantic_weight: float = DEFAULT_SEMANTIC_WEIGHT,
 ) -> list[SearchResult]:
-    if not query.strip():
-        return []
-
     kw_results = keyword_search(
-        conn, query, type=type, category=category, status=status, limit=limit,
+        conn,
+        query,
+        type=type,
+        status=status,
+        category=category,
+        date_from=date_from,
+        date_to=date_to,
+        limit=limit,
     )
-    sem_results = semantic_search(
-        conn, vector_store, embedding_service, query, limit=limit,
-    )
-    sem_results = _apply_filters(sem_results, type=type, category=category, status=status)
 
-    return merge_results(
+    sem_results = semantic_search(
+        conn,
+        vector_store,
+        embedding_service,
+        query,
+        limit=limit,
+    )
+    sem_results = _apply_filters(
+        sem_results,
+        type=type,
+        category=category,
+        status=status,
+    )
+
+    return _merge(
         kw_results,
         sem_results,
         keyword_weight=keyword_weight,
@@ -43,61 +55,71 @@ def hybrid_search(
 
 
 def merge_results(
-    keyword_results: list[SearchResult],
-    semantic_results: list[SearchResult],
+    kw_results: list[SearchResult],
+    sem_results: list[SearchResult],
     *,
-    keyword_weight: float = DEFAULT_KEYWORD_WEIGHT,
-    semantic_weight: float = DEFAULT_SEMANTIC_WEIGHT,
+    keyword_weight: float = 0.4,
+    semantic_weight: float = 0.6,
     limit: int = 20,
 ) -> list[SearchResult]:
-    kw_max = _max_score(keyword_results)
-    sem_max = _max_score(semantic_results)
-
-    scored: dict[str, tuple[float, SearchResult]] = {}
-
-    for r in keyword_results:
-        normalized = _normalize(r.score, kw_max)
-        weighted = normalized * keyword_weight
-        scored[r.item.id] = (weighted, SearchResult(
-            item=r.item,
-            score=weighted,
-            source="keyword",
-        ))
-
-    for r in semantic_results:
-        normalized = _normalize(r.score, sem_max)
-        weighted = normalized * semantic_weight
-        item_id = r.item.id
-
-        if item_id in scored:
-            existing_score, existing_result = scored[item_id]
-            combined = existing_score + weighted
-            scored[item_id] = (combined, SearchResult(
-                item=existing_result.item,
-                score=combined,
-                source="hybrid",
-            ))
-        else:
-            scored[item_id] = (weighted, SearchResult(
-                item=r.item,
-                score=weighted,
-                source="semantic",
-            ))
-
-    ranked = sorted(scored.values(), key=lambda x: x[0], reverse=True)
-    return [result for _, result in ranked[:limit]]
+    return _merge(
+        kw_results,
+        sem_results,
+        keyword_weight=keyword_weight,
+        semantic_weight=semantic_weight,
+        limit=limit,
+    )
 
 
-def _max_score(results: list[SearchResult]) -> float:
-    if not results:
-        return 1.0
-    return max(r.score for r in results) or 1.0
+def _merge(
+    kw_results: list[SearchResult],
+    sem_results: list[SearchResult],
+    *,
+    keyword_weight: float,
+    semantic_weight: float,
+    limit: int,
+) -> list[SearchResult]:
+    scores: dict[str, float] = {}
+    items: dict[str, SearchResult] = {}
+
+    kw_max = max((r.score for r in kw_results), default=0.0)
+    kw_ids = set()
+    for r in kw_results:
+        norm = _normalize(r.score, kw_max)
+        scores[r.item.id] = keyword_weight * norm
+        items[r.item.id] = r
+        kw_ids.add(r.item.id)
+
+    sem_ids = set()
+    sem_max = max((r.score for r in sem_results), default=0.0)
+    for r in sem_results:
+        norm = _normalize(r.score, sem_max)
+        scores[r.item.id] = scores.get(r.item.id, 0.0) + semantic_weight * norm
+        sem_ids.add(r.item.id)
+        if r.item.id not in items:
+            items[r.item.id] = r
+
+    both = kw_ids & sem_ids
+
+    ranked = sorted(
+        scores.items(),
+        key=lambda x: x[1],
+        reverse=True,
+    )[:limit]
+    return [
+        SearchResult(
+            item=items[item_id].item,
+            score=score,
+            source="hybrid" if item_id in both else items[item_id].source,
+        )
+        for item_id, score in ranked
+    ]
 
 
-def _normalize(score: float, max_score: float) -> float:
-    if max_score == 0:
+def _normalize(value: float, max_value: float) -> float:
+    if max_value <= 0:
         return 0.0
-    return score / max_score
+    return value / max_value
 
 
 def _apply_filters(
@@ -108,10 +130,10 @@ def _apply_filters(
     status: str | None = None,
 ) -> list[SearchResult]:
     filtered = results
-    if type is not None:
+    if type:
         filtered = [r for r in filtered if r.item.type == type]
-    if category is not None:
+    if category:
         filtered = [r for r in filtered if r.item.category == category]
-    if status is not None:
+    if status:
         filtered = [r for r in filtered if r.item.status == status]
     return filtered

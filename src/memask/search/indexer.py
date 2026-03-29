@@ -1,18 +1,17 @@
 import sqlite3
 
 from memask.search.chunking import chunk_text, needs_chunking
-from memask.search.embedding import EmbeddingService
 from memask.search.vector_store import VectorStore
 
 
 def index_item(
     conn: sqlite3.Connection,
     vector_store: VectorStore,
-    embedding_service: EmbeddingService,
+    embedding_service,
     item_id: str,
 ) -> int:
     row = conn.execute(
-        "SELECT id, content, title FROM items WHERE id = ? AND deleted_at IS NULL",
+        "SELECT content, title FROM items WHERE id = ? AND deleted_at IS NULL",
         (item_id,),
     ).fetchone()
 
@@ -20,17 +19,26 @@ def index_item(
         return 0
 
     text = _item_text(row["content"], row["title"])
-
     vector_store.delete_by_item(item_id)
 
     if needs_chunking(text):
-        return _index_chunked(vector_store, embedding_service, item_id, text)
-    return _index_whole(vector_store, embedding_service, item_id, text)
+        return _index_chunked(
+            vector_store,
+            embedding_service,
+            item_id,
+            text,
+        )
+    return _index_whole(
+        vector_store,
+        embedding_service,
+        item_id,
+        text,
+    )
 
 
 def _index_whole(
-    vector_store: VectorStore,
-    embedding_service: EmbeddingService,
+    vector_store,
+    embedding_service,
     item_id: str,
     text: str,
 ) -> int:
@@ -46,8 +54,8 @@ def _index_whole(
 
 
 def _index_chunked(
-    vector_store: VectorStore,
-    embedding_service: EmbeddingService,
+    vector_store,
+    embedding_service,
     item_id: str,
     text: str,
 ) -> int:
@@ -87,17 +95,24 @@ def reconcile(
 def reindex_stale(
     conn: sqlite3.Connection,
     vector_store: VectorStore,
-    embedding_service: EmbeddingService,
+    embedding_service,
 ) -> int:
     stale = vector_store.stale_items(embedding_service.model_name)
     count = 0
     for item_id in stale:
-        count += index_item(conn, vector_store, embedding_service, item_id)
+        count += index_item(
+            conn,
+            vector_store,
+            embedding_service,
+            item_id,
+        )
     return count
 
 
 def _active_item_ids(conn: sqlite3.Connection) -> set[str]:
-    rows = conn.execute("SELECT id FROM items WHERE deleted_at IS NULL").fetchall()
+    rows = conn.execute(
+        "SELECT id FROM items WHERE deleted_at IS NULL",
+    ).fetchall()
     return {row["id"] for row in rows}
 
 

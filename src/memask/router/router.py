@@ -1,38 +1,60 @@
 import logging
+from dataclasses import dataclass
 
+from memask.router.embedding_classifier import classify_by_embedding
 from memask.router.intents import Confidence, RoutingResult
-from memask.router.llm_classifier import classify_by_llm, is_ollama_available
 from memask.router.rules import classify_by_rules
 
 logger = logging.getLogger(__name__)
 
 
-def route(text: str) -> RoutingResult:
+@dataclass(frozen=True)
+class RouterConfig:
+    embedding_threshold: Confidence = Confidence.LOW
+    enable_embedding: bool = True
+
+
+_DEFAULT_CONFIG = RouterConfig()
+
+
+def route(
+    text: str,
+    embedding_service=None,
+    config: RouterConfig | None = None,
+) -> RoutingResult:
+    cfg = config or _DEFAULT_CONFIG
     rules_result = classify_by_rules(text)
 
-    if rules_result.confidence != Confidence.LOW:
+    if rules_result.confidence != cfg.embedding_threshold:
         logger.debug(
             "rules classified '%s' as %s (%s)",
-            text[:50], rules_result.intent.value, rules_result.confidence.value,
+            text[:50],
+            rules_result.intent.value,
+            rules_result.confidence.value,
         )
         return rules_result
 
-    if not is_ollama_available():
-        logger.debug("ollama unavailable, using rules fallback for '%s'", text[:50])
+    if not cfg.enable_embedding:
+        logger.debug("embedding disabled, using rules for '%s'", text[:50])
+        return rules_result
+
+    if embedding_service is None:
+        logger.debug("no embedding service, using rules fallback for '%s'", text[:50])
         return rules_result
 
     try:
-        llm_result = classify_by_llm(text)
+        emb_result = classify_by_embedding(text, embedding_service)
     except Exception:
-        logger.warning("llm classification failed, falling back to rules")
+        logger.warning("embedding classification failed, falling back to rules")
         return rules_result
 
-    if llm_result is None:
-        logger.debug("llm returned None, using rules fallback")
+    if emb_result is None:
+        logger.debug("embedding returned None, using rules fallback")
         return rules_result
 
     logger.debug(
-        "llm classified '%s' as %s",
-        text[:50], llm_result.intent.value,
+        "embedding classified '%s' as %s",
+        text[:50],
+        emb_result.intent.value,
     )
-    return llm_result
+    return emb_result

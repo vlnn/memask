@@ -2,7 +2,7 @@ import json
 
 import pytest
 
-from conftest import FakeEmbeddingService
+from tests.helpers import FakeEmbeddingService
 from memask.repository.items import create_item, soft_delete_item
 from memask.repository.jobs import enqueue, queue_status
 from memask.search.indexer import index_item

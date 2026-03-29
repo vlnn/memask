@@ -20,7 +20,6 @@ def up(conn: sqlite3.Connection) -> None:
     """)
     conn.execute("CREATE INDEX idx_jobs_status ON jobs (status)")
     conn.execute("CREATE INDEX idx_jobs_type ON jobs (type)")
-    conn.execute("CREATE INDEX idx_jobs_status_created ON jobs (status, created_at)")
 
 
 def down(conn: sqlite3.Connection) -> None:

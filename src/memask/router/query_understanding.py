@@ -3,30 +3,54 @@ import re
 from memask.router.intents import QueryContext
 
 DATE_PATTERNS = [
-    re.compile(r"\blast\s+(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b", re.I),
-    re.compile(r"\b(?:this|last)\s+(?:week|month|morning|evening|night)\b", re.I),
-    re.compile(r"\byesterday\b", re.I),
-    re.compile(r"\btoday\b", re.I),
-    re.compile(r"\b(?:january|february|march|april|may|june|july|august|september|october|november|december)\b", re.I),
+    re.compile(r"\b(?:yesterday|today|tomorrow)\b", re.I),
+    re.compile(
+        r"\blast\s+(?:week|month|year|monday|tuesday|"
+        r"wednesday|thursday|friday|saturday|sunday)\b",
+        re.I,
+    ),
+    re.compile(
+        r"\bthis\s+(?:week|month|year|morning|afternoon|evening)\b",
+        re.I,
+    ),
+    re.compile(r"\b\d{4}-\d{2}-\d{2}\b"),
+    re.compile(
+        r"\b(?:january|february|march|april|may|june|"
+        r"july|august|september|october|november|december)\b",
+        re.I,
+    ),
 ]
 
 TOPIC_PATTERNS = [
-    re.compile(r"\babout\s+(?:the\s+)?(.+?)(?:\s+(?:yesterday|today|last|this|from)\b|[?.]|$)", re.I),
-    re.compile(r"\bon\s+(?:the\s+)?(.+?)(?:\s+(?:yesterday|today|last|this|from)\b|[?.]|$)", re.I),
-    re.compile(r"\bfor\s+(?:the\s+)?(.+?)(?:\s+(?:yesterday|today|last|this|from)\b|[?.]|$)", re.I),
+    re.compile(
+        r"(?:search|looking|look)\s+for\s+(.+?)(?:\s+(?:yesterday|today|last|this|from|since)|\?|$)",
+        re.I,
+    ),
+    re.compile(
+        r"(?:notes?|thoughts?|ideas?)\s+(?:about|on|regarding)\s+(.+?)(?:\s+(?:yesterday|today|last|this)|\?|$)",
+        re.I,
+    ),
+    re.compile(
+        r"(?:about|regarding|on|re)\s+(.+?)(?:\s+(?:yesterday|today|last|this|from|since)|\?|$)",
+        re.I,
+    ),
 ]
 
 TYPE_MAP = {
+    "note": "note",
+    "notes": "note",
     "todo": "todo",
     "todos": "todo",
     "task": "todo",
     "tasks": "todo",
-    "note": "note",
-    "notes": "note",
     "decision": "decision",
     "decisions": "decision",
     "guide": "guide",
     "guides": "guide",
+    "url": "url",
+    "urls": "url",
+    "link": "url",
+    "links": "url",
 }
 
 STATUS_MAP = {
@@ -34,29 +58,23 @@ STATUS_MAP = {
     "open": "pending",
     "done": "done",
     "completed": "done",
-    "complete": "done",
     "cancelled": "cancelled",
     "canceled": "cancelled",
 }
 
 
 def extract_query_context(text: str) -> QueryContext:
-    raw_query = _strip_prefix(text)
-    date_hints = _extract_date_hints(raw_query)
-    topic = _extract_topic(raw_query)
-    type_filter = _extract_type_filter(raw_query)
-    status_filter = _extract_status_filter(raw_query)
-
+    raw_query = _strip_prefixes(text)
     return QueryContext(
-        date_hints=date_hints,
-        topic=topic,
-        type_filter=type_filter,
-        status_filter=status_filter,
+        date_hints=_extract_date_hints(text),
+        topic=_extract_topic(text),
+        type_filter=_extract_type_filter(text),
+        status_filter=_extract_status_filter(text),
         raw_query=raw_query,
     )
 
 
-def _strip_prefix(text: str) -> str:
+def _strip_prefixes(text: str) -> str:
     stripped = text.strip()
     if stripped.startswith(("?", "!", "/")):
         stripped = stripped[1:]
@@ -76,9 +94,14 @@ def _extract_topic(text: str) -> str | None:
         match = pattern.search(text)
         if match:
             topic = match.group(1).strip().rstrip("?.,!")
+            topic = _strip_articles(topic)
             if topic and len(topic) > 1:
                 return topic
     return None
+
+
+def _strip_articles(text: str) -> str:
+    return re.sub(r"^(?:the|a|an)\s+", "", text, flags=re.I)
 
 
 def _extract_type_filter(text: str) -> str | None:

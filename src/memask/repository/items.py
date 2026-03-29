@@ -1,59 +1,87 @@
 import sqlite3
 
-from memask.ulid import ulid
-
 from memask.clock import now
 from memask.models.item import Item
+from memask.ulid import ulid
 
-VALID_TYPES = {"note", "todo", "url", "decision", "guide"}
-UPDATABLE_FIELDS = {
-    "type",
-    "content",
-    "title",
-    "status",
-    "priority",
-    "due_date",
-    "category",
-    "source",
-    "tags",
-    "metadata",
-}
+UPDATABLE_FIELDS = frozenset(
+    {
+        "type",
+        "content",
+        "title",
+        "status",
+        "priority",
+        "due_date",
+        "category",
+        "source",
+        "tags",
+        "metadata",
+    }
+)
+
+
+VALID_TYPES = frozenset(
+    {
+        "note",
+        "todo",
+        "url",
+        "decision",
+        "guide",
+    }
+)
 
 
 def create_item(
     conn: sqlite3.Connection,
     content: str,
+    *,
     type: str = "note",
-    **kwargs: str | int | None,
+    title: str | None = None,
+    status: str | None = None,
+    priority: int | None = None,
+    due_date: str | None = None,
+    category: str | None = None,
+    source: str = "manual",
+    tags: str | None = None,
+    metadata: str | None = None,
+    **_kwargs,
 ) -> Item:
     if type not in VALID_TYPES:
-        raise ValueError(f"Invalid type: {type}. Must be one of {VALID_TYPES}")
-
-    item_id = str(ulid())
+        raise ValueError(f"Invalid type: {type}")
+    item_id = ulid()
     timestamp = now()
 
-    fields = {
-        "id": item_id,
-        "type": type,
-        "content": content,
-        "created_at": timestamp,
-        "updated_at": timestamp,
-        **{k: v for k, v in kwargs.items() if k in UPDATABLE_FIELDS},
-    }
-
-    columns = ", ".join(fields.keys())
-    placeholders = ", ".join("?" for _ in fields)
-
     conn.execute(
-        f"INSERT INTO items ({columns}) VALUES ({placeholders})",
-        tuple(fields.values()),
+        """INSERT INTO items
+           (id, type, content, title, status, priority,
+            due_date, category, source, tags,
+            created_at, updated_at, metadata)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        (
+            item_id,
+            type,
+            content,
+            title,
+            status,
+            priority,
+            due_date,
+            category,
+            source,
+            tags,
+            timestamp,
+            timestamp,
+            metadata,
+        ),
     )
     conn.commit()
     return get_item(conn, item_id)
 
 
 def get_item(conn: sqlite3.Connection, item_id: str) -> Item | None:
-    row = conn.execute("SELECT * FROM items WHERE id = ?", (item_id,)).fetchone()
+    row = conn.execute(
+        "SELECT * FROM items WHERE id = ?",
+        (item_id,),
+    ).fetchone()
     return Item.from_row(row) if row else None
 
 
@@ -80,7 +108,8 @@ def update_item(
 def soft_delete_item(conn: sqlite3.Connection, item_id: str) -> bool:
     timestamp = now()
     cursor = conn.execute(
-        "UPDATE items SET deleted_at = ?, updated_at = ? WHERE id = ? AND deleted_at IS NULL",
+        "UPDATE items SET deleted_at = ?, updated_at = ?"
+        " WHERE id = ? AND deleted_at IS NULL",
         (timestamp, timestamp, item_id),
     )
     conn.commit()
@@ -94,9 +123,10 @@ def list_items(
     status: str | None = None,
     category: str | None = None,
     include_deleted: bool = False,
+    limit: int = 100,
 ) -> list[Item]:
-    conditions: list[str] = []
-    params: list[str] = []
+    conditions = []
+    params: list = []
 
     if not include_deleted:
         conditions.append("deleted_at IS NULL")
@@ -110,10 +140,9 @@ def list_items(
         conditions.append("category = ?")
         params.append(category)
 
-    query = "SELECT * FROM items"
-    if conditions:
-        query += " WHERE " + " AND ".join(conditions)
-    query += " ORDER BY created_at DESC"
-
-    rows = conn.execute(query, params).fetchall()
-    return [Item.from_row(row) for row in rows]
+    where = " AND ".join(conditions) if conditions else "1=1"
+    rows = conn.execute(
+        f"SELECT * FROM items WHERE {where} ORDER BY created_at DESC LIMIT ?",
+        (*params, limit),
+    ).fetchall()
+    return [Item.from_row(r) for r in rows]

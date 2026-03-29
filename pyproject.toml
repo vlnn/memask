@@ -1,45 +1,38 @@
 [project]
 name = "memask"
-version = "0.1.0"
-description = "Add your description here"
-readme = "README.md"
-authors = [
-    { name = "vlnn", email = "vlnn-github@proton.me" }
-]
-requires-python = ">=3.13"
+version = "0.3.5"
+requires-python = ">=3.12"
 dependencies = [
-    "click>=8.3.1",
-    "lancedb>=0.30.1",
-    "sentence-transformers>=5.3.0",
-    "ulid>=1.1",
-]
-
-[build-system]
-requires = ["uv_build>=0.8.3,<0.9.0"]
-build-backend = "uv_build"
-
-[dependency-groups]
-dev = [
-    "pytest>=9.0.2",
-    "pytest-mock>=3.15.1",
-    "ruff>=0.8",
+    "click>=8.1",
+    "sentence-transformers>=3.0",
+    "lancedb>=0.15",
+    "pyarrow>=17.0",
 ]
 
 [project.scripts]
 memask = "memask.cli:cli"
 
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/memask"]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+    "pytest-mock>=3.0",
+    "ruff>=0.8",
+]
 
 [tool.pytest.ini_options]
 testpaths = ["src/tests", "tests"]
 pythonpath = ["src"]
-markers = [
-    "real_model: requires real embedding model download (deselect with -m 'not real_model')",
-]
 
 [tool.ruff]
 target-version = "py312"
 src = ["src"]
-line-length = 100
 
 [tool.ruff.lint]
 select = ["E", "F", "I"]

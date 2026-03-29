@@ -1,18 +1,20 @@
 import sqlite3
 
 version = 3
-name = "create_fts_index"
+name = "add_fts5_index"
 
 
 def up(conn: sqlite3.Connection) -> None:
     conn.execute("""
         CREATE VIRTUAL TABLE items_fts USING fts5(
-            title,
-            content,
-            tags,
+            title, content, tags,
             content='items',
             content_rowid='rowid'
         )
+    """)
+    conn.execute("""
+        INSERT INTO items_fts(rowid, title, content, tags)
+        SELECT rowid, title, content, tags FROM items WHERE deleted_at IS NULL
     """)
     conn.execute("""
         CREATE TRIGGER items_fts_insert AFTER INSERT ON items BEGIN

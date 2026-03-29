@@ -1,7 +1,7 @@
 import click
 
-from memask.db.connection import get_connection
-from memask.db.migrate import migrate_up
+from memask.app import AppContext
+from memask.context import ServiceContext
 from memask.repository import items, jobs
 from memask.router.dispatcher import dispatch
 from memask.search.hybrid import hybrid_search
@@ -9,48 +9,35 @@ from memask.search.keyword import keyword_search
 from memask.search.worker import enqueue_embedding, process_all_pending
 
 
-def _lance_path(db_path):
-    from pathlib import Path
-    if db_path:
-        return Path(db_path).parent / "vectors"
-    return Path.home() / ".memask" / "vectors"
+def _get_app(ctx: click.Context) -> AppContext:
+    return ctx.obj["app"]
 
 
-def _get_store(ctx: click.Context):
-    if "store" not in ctx.obj:
-        from memask.search.vector_store import VectorStore
-        ctx.obj["store"] = VectorStore(_lance_path(ctx.obj.get("db_path")))
-    return ctx.obj["store"]
-
-
-def _get_embedder(ctx: click.Context):
-    if "embedder" not in ctx.obj:
-        from memask.search.embedding import EmbeddingService
-        ctx.obj["embedder"] = EmbeddingService()
-    return ctx.obj["embedder"]
+def _get_svc(ctx: click.Context) -> ServiceContext:
+    return _get_app(ctx).service_context()
 
 
 @click.group()
 @click.option(
-    "--db", default=None,
+    "--db",
+    default=None,
     help="Database path (default: ~/.memask/memask.db)",
 )
 @click.pass_context
 def cli(ctx: click.Context, db: str | None) -> None:
     ctx.ensure_object(dict)
-    conn = get_connection(db)
-    migrate_up(conn)
-    ctx.obj["conn"] = conn
-    ctx.obj["db_path"] = db
+    app = AppContext(db_path=db)
+    ctx.obj["app"] = app
+    ctx.call_on_close(app.shutdown)
 
 
 @cli.command()
 @click.argument("text", nargs=-1, required=True)
 @click.pass_context
 def input(ctx: click.Context, text: tuple[str, ...]) -> None:
-    """Single input endpoint — routes to capture, search, todo, or command."""
-    joined = " ".join(text)
-    result = dispatch(ctx.obj["conn"], joined)
+    svc = _get_svc(ctx)
+    full_text = " ".join(text)
+    result = dispatch(svc, full_text)
 
     formatters = {
         "captured": _format_captured,
@@ -61,69 +48,61 @@ def input(ctx: click.Context, text: tuple[str, ...]) -> None:
         "todo_not_found": _format_todo_not_found,
         "app_command": _format_app_command,
     }
-
     formatter = formatters.get(result.action, _format_default)
     formatter(result)
 
 
 @cli.command()
-@click.argument("content")
+@click.argument("content", nargs=-1, required=True)
 @click.option("--type", "item_type", default="note")
-@click.option("--title")
 @click.option("--status")
-@click.option("--priority", type=int)
-@click.option("--due-date")
 @click.option("--category")
 @click.option("--tags")
 @click.pass_context
 def create(
     ctx: click.Context,
-    content: str,
+    content: tuple[str, ...],
     item_type: str,
-    title: str | None,
     status: str | None,
-    priority: int | None,
-    due_date: str | None,
     category: str | None,
     tags: str | None,
 ) -> None:
-    kwargs = {
-        k: v
-        for k, v in {
-            "title": title,
-            "status": status,
-            "priority": priority,
-            "due_date": due_date,
-            "category": category,
-            "tags": tags,
-        }.items()
-        if v is not None
-    }
-    conn = ctx.obj["conn"]
-    item = items.create_item(conn, content=content, type=item_type, **kwargs)
-    enqueue_embedding(conn, item.id)
-    click.echo(f"Created {item.type}: {item.id}")
+    svc = _get_svc(ctx)
+    full_content = " ".join(content)
+    item = items.create_item(
+        svc.conn,
+        full_content,
+        type=item_type,
+        status=status,
+        category=category,
+        tags=tags,
+    )
+    if svc.store is not None and svc.embedder is not None:
+        enqueue_embedding(svc.conn, item.id)
+        process_all_pending(svc.conn, svc.store, svc.embedder)
+    click.echo(f"Created [{item.type}] {item.id}: {item.content}")
 
 
 @cli.command("list")
 @click.option("--type", "item_type")
 @click.option("--status")
 @click.option("--category")
-@click.option("--include-deleted", is_flag=True)
+@click.option("--limit", default=20, type=int)
 @click.pass_context
 def list_cmd(
     ctx: click.Context,
     item_type: str | None,
     status: str | None,
     category: str | None,
-    include_deleted: bool,
+    limit: int,
 ) -> None:
+    svc = _get_svc(ctx)
     results = items.list_items(
-        ctx.obj["conn"],
+        svc.conn,
         type=item_type,
         status=status,
         category=category,
-        include_deleted=include_deleted,
+        limit=limit,
     )
     if not results:
         click.echo("No items found.")
@@ -141,10 +120,7 @@ def list_cmd(
 @click.option("--status")
 @click.option("--category")
 @click.option("--limit", default=20, type=int)
-@click.option(
-    "--keyword-only", is_flag=True,
-    help="Skip semantic search, keyword match only",
-)
+@click.option("--keyword-only", is_flag=True)
 @click.pass_context
 def search(
     ctx: click.Context,
@@ -155,38 +131,44 @@ def search(
     limit: int,
     keyword_only: bool,
 ) -> None:
-    conn = ctx.obj["conn"]
+    svc = _get_svc(ctx)
 
-    if keyword_only:
+    if keyword_only or svc.store is None or svc.embedder is None:
         results = keyword_search(
-            conn, query,
-            type=item_type, status=status,
-            category=category, limit=limit,
+            svc.conn,
+            query,
+            type=item_type,
+            status=status,
+            category=category,
+            limit=limit,
         )
     else:
         results = hybrid_search(
-            conn, _get_store(ctx), _get_embedder(ctx), query,
-            type=item_type, status=status,
-            category=category, limit=limit,
+            svc.conn,
+            svc.store,
+            svc.embedder,
+            query,
+            type=item_type,
+            status=status,
+            category=category,
+            limit=limit,
         )
 
     if not results:
         click.echo("No results found.")
         return
-
     for result in results:
         item = result.item
         score = f"{result.score:.3f}"
-        prefix = f"[{item.type}]"
-        if item.status:
-            prefix += f" ({item.status})"
-        click.echo(f"{prefix} [{score}] {item.id}: {item.content}")
+        source = result.source
+        click.echo(f"[{item.type}] [{source} {score}] {item.id}: {item.content}")
 
 
 @cli.command("job-status")
 @click.pass_context
 def job_status(ctx: click.Context) -> None:
-    stats = jobs.queue_status(ctx.obj["conn"])
+    svc = _get_svc(ctx)
+    stats = jobs.queue_status(svc.conn)
     if not stats:
         click.echo("No jobs.")
         return
@@ -197,50 +179,53 @@ def job_status(ctx: click.Context) -> None:
 @cli.command("reindex")
 @click.pass_context
 def reindex(ctx: click.Context) -> None:
-    """Process pending embedding jobs and reindex stale items."""
     from memask.search.startup import on_startup
 
-    conn = ctx.obj["conn"]
-    store = _get_store(ctx)
-    embedder = _get_embedder(ctx)
+    svc = _get_svc(ctx)
+    if svc.store is None or svc.embedder is None:
+        click.echo("No embedding service configured.")
+        return
 
-    result = on_startup(conn, store, embedder)
+    result = on_startup(svc.conn, svc.store, svc.embedder)
     click.echo(f"Recovered {result['stalled_recovered']} stalled jobs")
     click.echo(f"Removed {result['orphans_removed']} orphaned vectors")
-    click.echo(
-        f"Enqueued {result['stale_reindex_enqueued']} items for reindexing"
-    )
+    click.echo(f"Enqueued {result['stale_reindex_enqueued']} items for reindexing")
 
-    processed = process_all_pending(conn, store, embedder)
+    processed = process_all_pending(svc.conn, svc.store, svc.embedder)
     click.echo(f"Processed {processed} jobs")
 
 
 def _format_captured(result):
-    click.echo(f"Saved: {result.item.content}")
+    click.echo(f"Saved: {result.data.get('content', '')}")
 
 
 def _format_searched(result):
-    if not result.items:
+    results = result.data.get("results", [])
+    if not results:
         click.echo("No results found.")
         return
-    for item in result.items:
-        click.echo(f"  [{item.type}] {item.id}: {item.content}")
+    for r in results:
+        tag = r.get("type", "?")
+        src = r.get("source", "?")
+        score = r.get("score", 0)
+        click.echo(f"  [{tag}] [{src} {score:.3f}] {r['id']}: {r['content']}")
 
 
 def _format_todo_created(result):
-    click.echo(f"Todo: {result.item.content}")
+    click.echo(f"Todo: {result.data.get('content', '')}")
 
 
 def _format_todo_listed(result):
-    if not result.items:
+    items_data = result.data.get("items", [])
+    if not items_data:
         click.echo("No pending todos.")
         return
-    for todo in result.items:
-        click.echo(f"  [ ] {todo.id}: {todo.content}")
+    for todo in items_data:
+        click.echo(f"  [ ] {todo['id']}: {todo['content']}")
 
 
 def _format_todo_completed(result):
-    click.echo(f"Done: {result.item.content}")
+    click.echo(f"Done: {result.data.get('content', '')}")
 
 
 def _format_todo_not_found(result):
@@ -248,7 +233,7 @@ def _format_todo_not_found(result):
 
 
 def _format_app_command(result):
-    click.echo(f"Command: {result.command}")
+    click.echo(f"Command: {result.data.get('command', '')}")
 
 
 def _format_default(result):

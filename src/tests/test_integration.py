@@ -2,7 +2,7 @@ import os
 
 import pytest
 
-from conftest import FakeEmbeddingService
+from tests.helpers import FakeEmbeddingService
 from memask.repository.items import create_item, soft_delete_item
 from memask.search.hybrid import hybrid_search
 from memask.search.keyword import keyword_search

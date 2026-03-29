@@ -13,68 +13,75 @@ APP_SLASH = re.compile(r"^/(?!todo\b)(\w+)", re.I)
 QUESTION_PREFIX = re.compile(r"^\?", re.I)
 
 QUESTION_STARTERS = re.compile(
-    r"^(?:what|when|where|who|how|which|why)\b.*\??\s*$", re.I,
+    r"^(?:what|when|where|who|how|which|why)\b.*\??\s*$",
+    re.I,
 )
 
 SEARCH_KEYWORDS = re.compile(
-    r"^(?:find|search\s+(?:for|my|the|about|in)|look\s+up|show\s+me)\b"
-    r"|\bwhat\s+did\s+i\s+(?:note|write|save|record)\b",
+    r"\b(?:find|search\s+for|look\s+up|show\s+me"
+    r"|what\s+did\s+i\s+(?:note|write|save|record))\b",
     re.I,
 )
 
 TODO_KEYWORDS = re.compile(
-    r"^(?:remind\s+(?:me\s+)?(?:to\s+|about\s+)?|todo[:\s]|add\s+todo\s)", re.I,
+    r"^(?:remind\s+(?:me\s+)?(?:to\s+|about\s+)?"
+    r"|todo[:\s]"
+    r"|add\s+todo\b)",
+    re.I,
 )
 
 TODO_SOFT_KEYWORDS = re.compile(
-    r"\b(?:i\s+need\s+to|don'?t\s+forget\s+to|remember\s+to|i\s+have\s+to|i\s+must|i\s+should)\b", re.I,
+    r"^(?:i\s+need\s+to|don'?t\s+forget\s+to"
+    r"|remember\s+to|i\s+have\s+to"
+    r"|i\s+must|i\s+should)\b",
+    re.I,
 )
 
 
 def classify_by_rules(text: str) -> RoutingResult:
     stripped = text.strip()
-    lower = stripped.lower()
-    query_context = extract_query_context(text)
+    ctx = extract_query_context(stripped)
 
     if TODO_LIST_SUFFIX.match(stripped):
-        return _result(Intent.TODO_LIST, Confidence.HIGH, text, query_context)
+        return _result(Intent.TODO_LIST, Confidence.HIGH, text, ctx)
 
     if TODO_DONE_SUFFIX.match(stripped):
-        return _result(Intent.TODO_COMPLETE, Confidence.HIGH, text, query_context)
+        return _result(Intent.TODO_COMPLETE, Confidence.HIGH, text, ctx)
 
     if TODO_PREFIX.match(stripped):
-        return _result(Intent.TODO_CREATE, Confidence.HIGH, text, query_context)
+        return _result(Intent.TODO_CREATE, Confidence.HIGH, text, ctx)
 
     if APP_BANG.match(stripped):
-        return _result(Intent.APP_COMMAND, Confidence.HIGH, text, query_context)
+        return _result(Intent.APP_COMMAND, Confidence.HIGH, text, ctx)
 
     if APP_SLASH.match(stripped):
-        return _result(Intent.APP_COMMAND, Confidence.HIGH, text, query_context)
+        return _result(Intent.APP_COMMAND, Confidence.HIGH, text, ctx)
 
     if QUESTION_PREFIX.match(stripped):
-        return _result(Intent.SEARCH, Confidence.HIGH, text, query_context)
-
-    if SEARCH_KEYWORDS.search(stripped):
-        return _result(Intent.SEARCH, Confidence.HIGH, text, query_context)
-
-    if QUESTION_STARTERS.match(stripped):
-        return _result(Intent.SEARCH, Confidence.HIGH, text, query_context)
+        return _result(Intent.SEARCH, Confidence.HIGH, text, ctx)
 
     if TODO_KEYWORDS.match(stripped):
-        return _result(Intent.TODO_CREATE, Confidence.HIGH, text, query_context)
+        return _result(Intent.TODO_CREATE, Confidence.HIGH, text, ctx)
 
-    if TODO_SOFT_KEYWORDS.search(stripped):
-        return _result(Intent.TODO_CREATE, Confidence.MEDIUM, text, query_context)
+    if TODO_SOFT_KEYWORDS.match(stripped):
+        return _result(Intent.TODO_CREATE, Confidence.MEDIUM, text, ctx)
 
-    if _looks_like_query(lower):
-        return _result(Intent.SEARCH, Confidence.LOW, text, query_context)
+    if SEARCH_KEYWORDS.search(stripped):
+        return _result(Intent.SEARCH, Confidence.HIGH, text, ctx)
 
-    return _result(Intent.CAPTURE, Confidence.LOW, text, query_context)
+    if QUESTION_STARTERS.match(stripped):
+        return _result(Intent.SEARCH, Confidence.MEDIUM, text, ctx)
+
+    if _has_query_signals(stripped):
+        return _result(Intent.SEARCH, Confidence.LOW, text, ctx)
+
+    return _result(Intent.CAPTURE, Confidence.MEDIUM, text, ctx)
 
 
-def _looks_like_query(lower: str) -> bool:
+def _has_query_signals(text: str) -> bool:
+    lower = text.lower()
     query_signals = [
-        r"\bnotes?\s+(?:about|on|from)\b",
+        r"\b(?:notes?|thoughts?|ideas?)\s+(?:about|on|from)\b",
         r"\b(?:about|regarding)\s+\w+\s+(?:yesterday|today|last)\b",
     ]
     return any(re.search(p, lower) for p in query_signals)

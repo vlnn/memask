@@ -92,7 +92,7 @@ class TestReconcile:
 
 class TestReindexStale:
     def test_reindexes_items_with_old_model(self, conn, store, fake_embedder):
-        from conftest import FakeEmbeddingService
+        from tests.helpers import FakeEmbeddingService
 
         old_embedder = FakeEmbeddingService(model_name="old-model")
         item = create_item(conn, "stale content")

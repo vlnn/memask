@@ -59,7 +59,7 @@ class TestProcessNextJob:
         assert status.get("complete", 0) == 1, "job should be complete (item gone is not an error)"
 
     def test_retries_on_failure(self, conn, store):
-        from conftest import FakeEmbeddingService
+        from tests.helpers import FakeEmbeddingService
 
         class FailingEmbedder(FakeEmbeddingService):
             def embed_one(self, text):
@@ -74,7 +74,7 @@ class TestProcessNextJob:
         assert updated.last_error is not None, "should record the error"
 
     def test_permanently_fails_after_max_attempts(self, conn, store):
-        from conftest import FakeEmbeddingService
+        from tests.helpers import FakeEmbeddingService
 
         class FailingEmbedder(FakeEmbeddingService):
             def embed_one(self, text):
