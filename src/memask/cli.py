@@ -410,3 +410,41 @@ def _format_daemon_result(data):
         click.echo(f"Command: {inner.get('command', '?')}")
     else:
         click.echo(f"[{action}] {inner}")
+
+
+@cli.command("install")
+def install_cmd():
+    """Install memask daemon to start on login."""
+    from memask.autostart import install
+
+    result = install()
+    if not result["installed"]:
+        raise click.ClickException(result.get("error", "installation failed"))
+
+    platform = result.get("platform", "unknown")
+    path = result["path"]
+    click.echo(f"Installed ({platform}): {path}")
+
+    if platform == "launchd":
+        click.echo("To start now:  launchctl load " + path)
+        click.echo("To stop:       launchctl unload " + path)
+    elif platform == "systemd":
+        click.echo("To start now:  systemctl --user enable --now memask")
+        click.echo("To stop:       systemctl --user disable --now memask")
+
+
+@cli.command("uninstall")
+def uninstall_cmd():
+    """Remove memask daemon from login startup."""
+    from memask.autostart import uninstall, status
+
+    current = status()
+    if not current["installed"]:
+        click.echo("Autostart not installed.")
+        return
+
+    result = uninstall()
+    if result.get("uninstalled"):
+        click.echo(f"Removed: {result['path']}")
+    else:
+        raise click.ClickException(result.get("error", "uninstall failed"))
