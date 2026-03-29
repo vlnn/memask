@@ -14,7 +14,7 @@ All ML runs in-process with no external daemons:
 No Ollama, no HTTP round-trips, no "is it running?" checks. If the model file exists and loads, it works for the lifetime of the process.
 
 
-## Phase 3.5: Consolidation
+## Phase 3.5: Consolidation [DONE]
 
 **Goal:** clean up the structural debt from Phases 0–3 so that Phase 4 (RAG) and Phase 5 (HTTP API) can build on solid foundations without mid-phase rewrites.
 
@@ -33,7 +33,7 @@ Tasks:
 **Done when:** `dispatch(svc_ctx, "what did I note about deployment?")` calls `hybrid_search` with all query understanding filters, `DispatchResult` has one canonical shape, and resource lifecycle is owned by `AppContext`. All existing tests still pass with the new signatures.
 
 
-## Phase 4: RAG pipeline
+## Phase 4: RAG pipeline [DONE]
 
 **Goal:** questions get answers synthesized from stored notes.
 
@@ -58,27 +58,57 @@ Tasks:
 **Done when:** asking `"what were my notes about the release plan?"` returns a synthesized answer citing specific notes. Tests cover: retrieval quality, prompt construction, fallback mode, session continuity. All RAG components are accessible through `ServiceContext` and testable with fakes. No external services required.
 
 
-## Phase 5: Daemon HTTP API
+## Phase 5: Daemon HTTP API [DONE]
 
 **Goal:** all functionality is accessible over localhost HTTP.
 
-Tasks:
+### Decisions made
 
-1. Decide sync vs async strategy. SQLite with the `sqlite3` module is synchronous and not thread-safe. Options: (a) use Starlette/Flask with a synchronous server, (b) use FastAPI with `run_in_executor` wrapping around `ServiceContext` calls, (c) switch to `aiosqlite`. Recommendation: start with (a) or (b) — don't rewrite the storage layer for async unless profiling shows it's needed. Document the decision.
+- **Sync strategy:** Flask (sync WSGI). SQLite is sync and single-user on localhost — async adds complexity with no benefit. FastAPI would require `run_in_executor` wrapping everywhere for zero gain.
+- **SQLite threading:** `check_same_thread=False` on all connections via `get_connection()`. Safe because WAL mode handles locking and there's one user on localhost. The background worker creates its own connection inside its thread.
+- **Background worker:** `threading.Thread` (daemon=True) with `time.sleep(5)` loop. Gets its own SQLite connection created inside the thread. Shares `VectorStore` and embedder from the main `AppContext` (these are thread-safe, unlike `sqlite3.Connection`).
+- **Port:** 7394 on 127.0.0.1 (localhost only).
+- **Dev server:** Flask's built-in server is fine for localhost single-user. Can swap to `waitress` in Phase 7 if needed.
+- **Settings endpoint:** stubbed as `{}` — flesh out in Phase 7.
 
-2. Build the HTTP server. `AppContext` is created once at startup, shared across all request handlers. Single `/input` endpoint accepts text, calls `dispatch(svc_ctx, text)`, returns `DispatchResult` as JSON. Additional endpoints: `/items` (list), `/search` (direct search), `/health`, `/settings`.
+### Gotchas encountered and resolved
 
-3. Add health endpoint: reports daemon up, LLM model loaded (name, quantization, RAM usage), job queue stats, index stats, embedding model version.
+- **SQLite cross-thread error:** `sqlite3.ProgrammingError: SQLite objects created in a thread can only be used in that same thread`. Hit twice: (1) background worker reusing `svc.conn`, fixed by giving the worker its own connection; (2) Flask request threads using a connection created during startup, fixed by adding `check_same_thread=False` to `get_connection()`.
+- **LanceDB table already exists:** `VectorStore._get_table()` used `list_tables()` to check existence, then `create_table()`, but newer LanceDB versions have a race/inconsistency where `list_tables()` misses the table but `create_table()` sees it. Fixed by trying `open_table()` first, falling back to `create_table()`.
 
-4. Add startup sequence: run migrations, initialize `AppContext` (which lazy-creates `ServiceContext` components), start background worker loop for embedding jobs. LLM and reranker load on first request, not at startup — keeps daemon start fast.
+### Files added
 
-5. Background worker: run `process_all_pending` on a timer (e.g. every 5s). Use a thread or async task depending on the decision from task 1.
+- `src/memask/server.py` — Flask app factory, endpoints: `/input`, `/items`, `/search`, `/health`, `/settings`
+- `src/memask/daemon.py` — daemon entry point: startup checks, background worker, Flask server
+- `src/memask/worker_thread.py` — background embedding worker thread
+- `src/memask/client.py` — `DaemonClient` HTTP client (stdlib `urllib`, no new dependency)
+- `src/tests/test_server.py` — HTTP endpoint integration tests
+- `src/tests/test_worker_thread.py` — background worker tests
+- `src/tests/test_client.py` — daemon client tests (spins up real Flask test server)
+- `src/tests/test_cli_daemon.py` — CLI in `--url` daemon mode
+- `src/tests/test_vector_store_reopen.py` — VectorStore reopening existing tables
 
-6. Write integration tests that hit the HTTP endpoints with a test `AppContext` using `FakeEmbeddingService` and `FakeLLM`.
+### Files modified
 
-7. Refactor CLI to become a thin HTTP client: `memask input "buy milk"` calls `POST /input`, `memask search "deployment"` calls `GET /search?q=deployment`. Keep direct-mode (no daemon) as a fallback for offline use.
+- `src/memask/cli.py` — added `--url` option, daemon client path for `input`/`search`/`list`, `serve` command, `_format_daemon_result()`
+- `src/memask/db/connection.py` — added `check_same_thread=False`
+- `src/memask/search/vector_store.py` — `_get_table()` now tries `open_table()` first
 
-**Done when:** `curl localhost:PORT/input -d '{"text": "buy milk"}'` creates a todo. The CLI works both as a direct tool and as an HTTP client. Background embedding runs without manual `reindex`.
+### Dependencies added
+
+- `flask>=3.0` in `pyproject.toml`
+
+### Tasks completed
+
+1. [DONE] Sync vs async decision: Flask (sync WSGI).
+2. [DONE] HTTP server: `create_app()` factory, `/input` dispatches through `dispatch()`, `/items`, `/search`, `/health`, `/settings`.
+3. [DONE] Health endpoint: LLM availability, embedder model name, job queue stats, vector index count.
+4. [DONE] Startup sequence: migrations via `AppContext.service_context()`, `on_startup()` for stalled jobs / orphans / stale reindex.
+5. [DONE] Background worker: daemon thread, 5s interval, own SQLite connection.
+6. [DONE] Integration tests: `test_server.py` (20 tests), `test_worker_thread.py`, `test_client.py`, `test_cli_daemon.py`.
+7. [DONE] CLI refactored: `--url` for daemon mode, direct mode fallback, `memask serve` command.
+
+**Done when:** `curl localhost:PORT/input -d '{"text": "buy milk"}'` creates a todo. The CLI works both as a direct tool and as an HTTP client. Background embedding runs without manual `reindex`. ✅
 
 
 ## Phase 6: Desktop UI (Tauri)
@@ -108,6 +138,8 @@ Tasks:
 4. Export/import: dump all items as JSON or markdown.
 5. Diagnostic panel: routing log, retrieval scores, job queue status.
 6. Performance profiling: capture latency, search latency, embedding throughput, LLM generation time.
+7. Consider swapping Flask dev server for `waitress` if needed.
+8. Flesh out `/settings` endpoint with actual settings management.
 
 
 ## Deferred (not in initial build)
