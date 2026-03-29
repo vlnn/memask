@@ -34,6 +34,7 @@ def create_app(app_context: AppContext) -> Flask:
     app.add_url_rule("/input", view_func=_input, methods=["POST"])
     app.add_url_rule("/items", view_func=_items, methods=["GET"])
     app.add_url_rule("/search", view_func=_search, methods=["GET"])
+    app.add_url_rule("/suggest", view_func=_suggest, methods=["GET"])
     app.add_url_rule("/settings", view_func=_settings, methods=["GET"])
 
     return app
@@ -114,6 +115,22 @@ def _search():
             for r in results
         ],
     })
+
+
+def _suggest():
+    from memask.suggest import suggest
+
+    query = request.args.get("q", "")
+    limit = request.args.get("limit", "10")
+
+    try:
+        limit_int = min(int(limit), 20)
+    except ValueError:
+        limit_int = 10
+
+    svc = _get_svc()
+    results = suggest(svc.conn, query, limit=limit_int)
+    return jsonify({"suggestions": results})
 
 
 def _settings():

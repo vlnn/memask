@@ -35,6 +35,9 @@ class DaemonClient:
     def search(self, query: str) -> dict:
         return self._get("/search", {"q": query})
 
+    def suggest(self, query: str, *, limit: int = 10) -> dict:
+        return self._get("/suggest", {"q": query, "limit": str(limit)})
+
     def settings(self) -> dict:
         return self._get("/settings")
 
