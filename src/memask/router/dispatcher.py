@@ -4,6 +4,7 @@ from typing import Any
 
 from memask.context import ServiceContext
 from memask.models.item import Item
+from memask.rag.pipeline import answer_question
 from memask.repository.items import create_item, list_items, update_item
 from memask.router.intents import Intent
 from memask.router.router import route
@@ -58,9 +59,46 @@ def _handle_capture(svc, text, routing):
 def _handle_search(svc, text, routing):
     ctx = routing.query_context
     query = ctx.raw_query
+    results = _retrieve(svc, query, ctx)
 
+    session_history = None
+    if svc.session is not None:
+        session_history = svc.session.history()
+
+    answer = answer_question(
+        query,
+        results,
+        llm=svc.llm,
+        reranker=svc.reranker,
+        session_history=session_history,
+    )
+
+    if answer.synthesized:
+        if svc.session is not None:
+            svc.session.add_exchange(query, answer.answer)
+
+        return DispatchResult(
+            action="answered",
+            data={
+                "answer": answer.answer,
+                "sources": answer.sources,
+                "results": _serialize_results(answer.raw_results),
+            },
+            items=[r.item for r in answer.raw_results],
+        )
+
+    return DispatchResult(
+        action="searched",
+        data={
+            "results": _serialize_results(answer.raw_results or results),
+        },
+        items=[r.item for r in (answer.raw_results or results)],
+    )
+
+
+def _retrieve(svc, query, ctx):
     if svc.store is not None and svc.embedder is not None:
-        results = hybrid_search(
+        return hybrid_search(
             svc.conn,
             svc.store,
             svc.embedder,
@@ -69,31 +107,25 @@ def _handle_search(svc, text, routing):
             status=ctx.status_filter,
             date_from=ctx.date_hints[0] if ctx.date_hints else None,
         )
-    else:
-        results = keyword_search(
-            svc.conn,
-            query,
-            type=ctx.type_filter,
-            status=ctx.status_filter,
-        )
-
-    items = [r.item for r in results]
-    return DispatchResult(
-        action="searched",
-        data={
-            "results": [
-                {
-                    "id": r.item.id,
-                    "content": r.item.content,
-                    "type": r.item.type,
-                    "score": r.score,
-                    "source": r.source,
-                }
-                for r in results
-            ]
-        },
-        items=items,
+    return keyword_search(
+        svc.conn,
+        query,
+        type=ctx.type_filter,
+        status=ctx.status_filter,
     )
+
+
+def _serialize_results(results):
+    return [
+        {
+            "id": r.item.id,
+            "content": r.item.content,
+            "type": r.item.type,
+            "score": r.score,
+            "source": r.source,
+        }
+        for r in results
+    ]
 
 
 def _handle_todo_create(svc, text, routing):
