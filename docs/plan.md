@@ -1,113 +1,116 @@
-## Plan of Action
+# Personal Memory App — Plan of Action (revised)
 
-### Phase 0: Foundation
+Phases 0–3 are complete. This plan covers everything from Phase 3.5 onward.
 
-**Goal:** runnable daemon with storage, schema migrations, and a CLI for manual testing.
+## LLM stack (no external services)
 
-Tasks:
-1. Set up project structure: `uv` for dependency management, `pytest` for testing, `src/` layout.
-2. Define SQLite schema and migration system. Write the `item` table migration. Write tests for migration up/down.
-3. Build the item repository layer — functions for create, read, update, soft-delete, list with filters. Test each operation.
-4. Build the background job queue in SQLite — enqueue, dequeue, mark complete, mark failed, retry logic. Test crash recovery (enqueue, simulate crash, restart, verify retry).
-5. Build a minimal CLI that can create an item, list items, and show job queue status. This is the test harness for everything that follows.
+All ML runs in-process with no external daemons:
 
-**Done when:** you can `create_item "buy milk" --type todo` and `list_items --type todo` from the command line, with full test coverage.
+- **Embeddings:** sentence-transformers (`all-MiniLM-L6-v2`), already integrated.
+- **Intent classification:** cosine similarity against intent exemplars using the embedding model, already integrated.
+- **Generative LLM:** `llama-cpp-python` loading a GGUF model file directly. Recommended starting point: Qwen2.5-3B-Instruct Q4_K_M (~2GB RAM, Metal-accelerated on macOS). Used for answer synthesis, summarization, and tag extraction.
+- **Reranking:** cross-encoder model via sentence-transformers, loaded in-process.
 
-### Phase 1: Search (keyword)
+No Ollama, no HTTP round-trips, no "is it running?" checks. If the model file exists and loads, it works for the lifetime of the process.
 
-**Goal:** items are searchable by text and filters without any ML.
 
-Tasks:
-1. Add SQLite FTS5 full-text index on item content and title. Write migration.
-2. Build search function: keyword query + optional filters (type, category, date range, status). Return ranked results.
-3. Add search to the CLI.
-4. Write tests covering: exact match, partial match, filter combinations, empty results, special characters.
+## Phase 3.5: Consolidation
 
-**Done when:** keyword search works reliably from the CLI. This is your non-LLM baseline.
-
-### Phase 2: Embeddings and vector search
-
-**Goal:** semantic search works alongside keyword search.
+**Goal:** clean up the structural debt from Phases 0–3 so that Phase 4 (RAG) and Phase 5 (HTTP API) can build on solid foundations without mid-phase rewrites.
 
 Tasks:
-1. Integrate sentence-transformers. Pick a model (e.g., `all-MiniLM-L6-v2` for speed). Write an embedding service with a clear interface.
-2. Set up LanceDB. Store embeddings with item ID and model version.
-3. Build the chunking logic for long content — split with overlap, link chunks to parent items. Test boundary cases (short content, exactly-at-threshold, long content).
-4. Build background embedding job: when an item is created, enqueue embedding. Worker picks it up, embeds, stores in LanceDB.
-5. Build semantic search function: embed query, search LanceDB, return candidates with scores.
-6. Build hybrid search: combine FTS5 results and LanceDB results. Merge, deduplicate, rank. Configurable weights.
-7. Build SQLite-LanceDB reconciliation job: find orphaned vectors, clean up.
-8. Add embedding model version tracking. Write reindexing job.
 
-**Done when:** `search "that thing about deployment"` returns relevant results even if the note says "shipping to production." Tests cover: embedding, chunking, hybrid merge, reconciliation, model version mismatch detection.
+1. Introduce `ServiceContext` — a dataclass holding `conn`, `store`, `embedder`, and later `llm`, `reranker`, and `session`. This is the single object that flows through `dispatch()`, replacing the bare `sqlite3.Connection` parameter. The CLI builds one from Click context; the future HTTP daemon builds one at startup. Test that dispatch works with a `ServiceContext` carrying a `FakeEmbeddingService` and in-memory `VectorStore`.
 
-### Phase 3: Intent router
+2. Settle `DispatchResult` on one shape. The codebase has two versions (action/item/items vs success/intent_name/data). Pick the one that serializes cleanly to JSON for Phase 5 — `DispatchResult` with `action: str`, `data: dict`, `items: list[Item]` is the likely winner. Remove the other. Update CLI formatters and all dispatcher tests to match.
 
-**Goal:** free-text input is classified and dispatched correctly.
+3. Upgrade `_handle_search` in the dispatcher to call `hybrid_search` through `ServiceContext` instead of `keyword_search` only. Wire `QueryContext` fields (`date_from`, `date_to`, `topic`, `category`) through to the search call — right now only `raw_query`, `type_filter`, and `status_filter` are used, meaning query understanding output is silently dropped.
 
-Tasks:
-1. Define the intent taxonomy: capture, search, todo_create, todo_list, todo_complete, app_command.
-2. Build rule-based router: prefix patterns (`/todo`, `?`, `!`), keyword triggers, heuristics. Test each intent with parametrized examples.
-3. Build query understanding layer: extract date hints, topic filters, type filters from natural language queries. Shared between router and retrieval.
-4. Add LLM-based classification (via Ollama) as a fallback when rules are ambiguous. Define "ambiguous" clearly — e.g., confidence below threshold.
-5. Build graceful degradation: when Ollama is unavailable, router is 100% rule-based. Test this explicitly.
-6. Wire router to existing handlers (create_item, search, todo operations).
+4. Make `route()` accept a config/context parameter so classifiers (rules, embedding) and thresholds can be injected and tested independently. This also makes it possible for the RAG pipeline to receive the full `RoutingResult` including `QueryContext` without re-parsing the input.
 
-**Done when:** `"remind me to buy milk"` creates a todo, `"what did I note about deployment?"` triggers search, `"/todo list"` lists todos — all from a single input endpoint. Tests cover: each intent, ambiguous inputs, Ollama-down fallback.
+5. Add an `AppContext` or `App` class that owns resource lifecycle: creates the `ServiceContext` components once, exposes a `shutdown()` that closes connections and releases models. The CLI instantiates it per invocation; the daemon instantiates it once at startup. Test startup and shutdown explicitly.
 
-### Phase 4: RAG pipeline
+**Done when:** `dispatch(svc_ctx, "what did I note about deployment?")` calls `hybrid_search` with all query understanding filters, `DispatchResult` has one canonical shape, and resource lifecycle is owned by `AppContext`. All existing tests still pass with the new signatures.
+
+
+## Phase 4: RAG pipeline
 
 **Goal:** questions get answers synthesized from stored notes.
 
 Tasks:
-1. Build context assembly: take top-N retrieval results, format as context for the LLM prompt.
-2. Add a reranking step: use a cross-encoder model to score retrieval candidates against the query. Test that reranking improves relevance over raw vector similarity.
-3. Build the answer generation prompt: system message, context, question. Include source references.
-4. Build the answer endpoint: router dispatches question → hybrid retrieval → rerank → context assembly → LLM → response with sources.
-5. Build non-LLM fallback: when Ollama is down, return ranked search results directly instead of a synthesized answer.
-6. Add session context: hold last N exchanges in memory, include in prompt for follow-up questions.
 
-**Done when:** asking `"what were my notes about the release plan?"` returns a synthesized answer citing specific notes. Tests cover: retrieval quality, prompt construction, fallback mode, session continuity.
+1. Build context assembly: take top-N retrieval results, format as context for the LLM prompt. The retrieval call uses `ServiceContext` and the `QueryContext` filters extracted by the router.
 
-### Phase 5: Daemon HTTP API
+2. Add a reranking step: use a cross-encoder model (e.g. `cross-encoder/ms-marco-MiniLM-L-6-v2`) to score retrieval candidates against the query. Loaded in-process via sentence-transformers, lazy-initialized and cached on `ServiceContext` like the embedder. Test that reranking improves relevance over raw vector similarity.
+
+3. Build an LLM client abstraction with a clear interface: `generate(prompt, system=None) -> str` and `is_available() -> bool`. Implementation uses `llama-cpp-python` with a GGUF model file. The model path is a config value; `is_available()` returns whether the model loaded successfully. Add to `ServiceContext` as `llm`, lazy-loaded on first generative call. Build a `FakeLLM` for tests that returns canned responses.
+
+4. Build the answer generation prompt: system message, context, question. Include source references. Keep prompts in a dedicated module — not inline strings in handler code.
+
+5. Build the answer endpoint: router dispatches question → hybrid retrieval → rerank → context assembly → LLM → response with sources. This is wired through `dispatch()` via `ServiceContext` — no new entry point needed.
+
+6. Build non-LLM fallback: when the model file is missing or failed to load, return ranked search results directly instead of a synthesized answer. The dispatcher checks `svc_ctx.llm.is_available()` and degrades. Unlike the old Ollama approach, this should only happen on first startup before the user has downloaded a model — not intermittently mid-session.
+
+7. Add session context: hold last N exchanges in memory on `ServiceContext`. Include in prompt for follow-up questions. Resets when `AppContext` restarts. Test that follow-up questions receive prior context.
+
+8. Add a CLI command for model management: `memask model download` fetches the default GGUF to a known location (e.g. `~/.memask/models/`), `memask model status` shows what's loaded. First-run experience can prompt the user to run this.
+
+**Done when:** asking `"what were my notes about the release plan?"` returns a synthesized answer citing specific notes. Tests cover: retrieval quality, prompt construction, fallback mode, session continuity. All RAG components are accessible through `ServiceContext` and testable with fakes. No external services required.
+
+
+## Phase 5: Daemon HTTP API
 
 **Goal:** all functionality is accessible over localhost HTTP.
 
 Tasks:
-1. Build a lightweight HTTP server (FastAPI or similar). Single input endpoint + specific endpoints for listing, settings, status.
-2. Wire all handlers through the HTTP layer.
-3. Add health endpoint (reports: daemon up, Ollama available, job queue stats, index stats).
-4. Add startup checks: run migrations, check Ollama, start background workers.
-5. Write integration tests that hit the HTTP endpoints.
 
-**Done when:** `curl localhost:PORT/input -d '{"text": "buy milk"}' ` creates a todo. The CLI becomes a thin HTTP client.
+1. Decide sync vs async strategy. SQLite with the `sqlite3` module is synchronous and not thread-safe. Options: (a) use Starlette/Flask with a synchronous server, (b) use FastAPI with `run_in_executor` wrapping around `ServiceContext` calls, (c) switch to `aiosqlite`. Recommendation: start with (a) or (b) — don't rewrite the storage layer for async unless profiling shows it's needed. Document the decision.
 
-### Phase 6: Desktop UI (Tauri)
+2. Build the HTTP server. `AppContext` is created once at startup, shared across all request handlers. Single `/input` endpoint accepts text, calls `dispatch(svc_ctx, text)`, returns `DispatchResult` as JSON. Additional endpoints: `/items` (list), `/search` (direct search), `/health`, `/settings`.
+
+3. Add health endpoint: reports daemon up, LLM model loaded (name, quantization, RAM usage), job queue stats, index stats, embedding model version.
+
+4. Add startup sequence: run migrations, initialize `AppContext` (which lazy-creates `ServiceContext` components), start background worker loop for embedding jobs. LLM and reranker load on first request, not at startup — keeps daemon start fast.
+
+5. Background worker: run `process_all_pending` on a timer (e.g. every 5s). Use a thread or async task depending on the decision from task 1.
+
+6. Write integration tests that hit the HTTP endpoints with a test `AppContext` using `FakeEmbeddingService` and `FakeLLM`.
+
+7. Refactor CLI to become a thin HTTP client: `memask input "buy milk"` calls `POST /input`, `memask search "deployment"` calls `GET /search?q=deployment`. Keep direct-mode (no daemon) as a fallback for offline use.
+
+**Done when:** `curl localhost:PORT/input -d '{"text": "buy milk"}'` creates a todo. The CLI works both as a direct tool and as an HTTP client. Background embedding runs without manual `reindex`.
+
+
+## Phase 6: Desktop UI (Tauri)
 
 **Goal:** tray icon, global hotkey, capture bar, results display.
 
 Tasks:
+
 1. Set up Tauri project. Tray icon with quit/show actions.
 2. Global hotkey opens a floating capture bar.
-3. Capture bar sends input to daemon, shows response.
-4. Results view for search results and answers.
+3. Capture bar sends input to daemon HTTP API, shows response.
+4. Results view for search results and synthesized answers (with source references).
 5. Todo list view.
-6. Status indicator (daemon health, Ollama status).
-7. First-run experience: check if daemon is running, prompt to start it, check Ollama.
+6. Status indicator (daemon health, LLM status) — reads from `/health`.
+7. First-run experience: check if daemon is running, prompt to start it. If no LLM model downloaded, show a setup prompt pointing to `memask model download`.
 
 **Done when:** you can press a hotkey, type a thought or question, and see a response — all from the tray popup. The daemon handles everything behind the scenes.
 
-### Phase 7: Polish and hardening
+
+## Phase 7: Polish and hardening
 
 Tasks:
+
 1. Startup automation: daemon starts on login, tray app starts on login.
 2. Error handling pass: every failure path shows a useful message in the UI.
-3. Settings UI: model selection, hotkey config, database location.
+3. Settings UI: model selection (swap GGUF files), hotkey config, database location.
 4. Export/import: dump all items as JSON or markdown.
 5. Diagnostic panel: routing log, retrieval scores, job queue status.
-6. Performance profiling: capture latency, search latency, embedding throughput.
+6. Performance profiling: capture latency, search latency, embedding throughput, LLM generation time.
 
-### Deferred (not in initial build)
+
+## Deferred (not in initial build)
 
 - Multi-window UI
 - File/URL ingestion pipeline
@@ -116,3 +119,4 @@ Tasks:
 - Cross-platform packaging
 - Event sourcing
 - Encrypted storage
+- Remote/cloud LLM backend option (API key based, for users who prefer it over local)
