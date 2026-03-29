@@ -27,6 +27,34 @@
       cursor: grab;
     }
 
+    /* ── tabs ───────────────────────────────────────── */
+
+    #tab-bar {
+      display: flex;
+      flex-shrink: 0;
+      border-bottom: 1px solid #2a2a36;
+      padding: 0 16px;
+      gap: 0;
+    }
+
+    .tab {
+      padding: 8px 14px;
+      font-size: 13px;
+      color: #5a5a6e;
+      cursor: pointer;
+      border-bottom: 2px solid transparent;
+      transition: color 0.15s, border-color 0.15s;
+      user-select: none;
+    }
+
+    .tab:hover { color: #9a9ab0; }
+    .tab.active { color: #c8c8d0; border-bottom-color: #8b8bf5; }
+
+    /* ── input view ─────────────────────────────────── */
+
+    #input-view { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+    #input-view.hidden { display: none; }
+
     #input-row {
       display: flex;
       align-items: center;
@@ -81,6 +109,112 @@
     }
 
     #response:empty { display: none; }
+
+    /* ── todo view ──────────────────────────────────── */
+
+    #todo-view { display: none; flex-direction: column; flex: 1; min-height: 0; }
+    #todo-view.active { display: flex; }
+
+    #todo-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 10px 16px;
+      border-bottom: 1px solid #2a2a36;
+      flex-shrink: 0;
+    }
+
+    #todo-count {
+      font-size: 13px;
+      color: #5a5a6e;
+    }
+
+    #todo-refresh {
+      background: none;
+      border: 1px solid #2a2a36;
+      color: #7a7a8c;
+      font-size: 12px;
+      padding: 3px 10px;
+      border-radius: 4px;
+      cursor: pointer;
+      font-family: inherit;
+    }
+
+    #todo-refresh:hover { color: #c8c8d0; border-color: #3a3a4a; }
+
+    #todo-list {
+      flex: 1;
+      overflow-y: auto;
+      padding: 4px 0;
+      scrollbar-width: thin;
+      scrollbar-color: #2a2a36 transparent;
+    }
+
+    .todo-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 10px 16px;
+      border-bottom: 1px solid #1e1e28;
+      cursor: pointer;
+      transition: background 0.1s;
+    }
+
+    .todo-row:hover { background: #1c1c26; }
+    .todo-row:last-child { border-bottom: none; }
+
+    .todo-checkbox {
+      width: 18px;
+      height: 18px;
+      border: 2px solid #3a3a4a;
+      border-radius: 50%;
+      flex-shrink: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: border-color 0.15s, background 0.15s;
+    }
+
+    .todo-row:hover .todo-checkbox { border-color: #8b8bf5; }
+
+    .todo-checkbox.completing {
+      border-color: #8bcc8b;
+      background: #8bcc8b;
+    }
+
+    .todo-checkbox.completing::after {
+      content: "✓";
+      color: #16161e;
+      font-size: 11px;
+      font-weight: bold;
+    }
+
+    .todo-text {
+      flex: 1;
+      color: #d0d0d8;
+      font-size: 14px;
+      line-height: 1.4;
+    }
+
+    .todo-text.completing {
+      color: #5a5a6e;
+      text-decoration: line-through;
+    }
+
+    .todo-empty {
+      padding: 32px 16px;
+      text-align: center;
+      color: #3e3e4e;
+      font-size: 14px;
+    }
+
+    .todo-error {
+      padding: 16px;
+      color: #cc8b8b;
+      font-size: 13px;
+    }
+
+    /* ── shared response styles ─────────────────────── */
 
     .msg { padding: 6px 0; line-height: 1.5; }
 
@@ -147,6 +281,8 @@
       padding: 8px 0;
     }
 
+    /* ── status bar ─────────────────────────────────── */
+
     #status-bar {
       flex-shrink: 0;
       padding: 4px 16px;
@@ -174,12 +310,29 @@
 <body>
   <div id="app">
     <div id="drag-region" data-tauri-drag-region></div>
-    <div id="input-row">
-      <div id="input-icon">›</div>
-      <input id="input" type="text" placeholder="Type a thought, question, or command…" autofocus spellcheck="false">
-      <div id="spinner"></div>
+
+    <div id="tab-bar">
+      <div class="tab active" data-view="input">Input</div>
+      <div class="tab" data-view="todos">Todos</div>
     </div>
-    <div id="response"></div>
+
+    <div id="input-view">
+      <div id="input-row">
+        <div id="input-icon">›</div>
+        <input id="input" type="text" placeholder="Type a thought, question, or command…" autofocus spellcheck="false">
+        <div id="spinner"></div>
+      </div>
+      <div id="response"></div>
+    </div>
+
+    <div id="todo-view">
+      <div id="todo-header">
+        <span id="todo-count"></span>
+        <button id="todo-refresh">refresh</button>
+      </div>
+      <div id="todo-list"></div>
+    </div>
+
     <div id="status-bar">
       <span><span id="status-dot"></span><span id="status-text">starting…</span></span>
       <span>⌘⇧Space to toggle · Esc to hide</span>
@@ -201,10 +354,98 @@
       return resp.json();
     }
 
+    async function fetchItems(type, status) {
+      const params = new URLSearchParams();
+      if (type) params.set("type", type);
+      if (status) params.set("status", status);
+      const resp = await fetch(`${DAEMON}/items?${params}`);
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      return resp.json();
+    }
+
     async function fetchHealth() {
       const resp = await fetch(`${DAEMON}/health`);
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
       return resp.json();
+    }
+
+    /* ── tab switching ──────────────────────────────── */
+
+    let activeView = "input";
+
+    function switchView(view) {
+      if (activeView === view) return;
+      activeView = view;
+
+      document.querySelectorAll(".tab").forEach(t => {
+        t.classList.toggle("active", t.dataset.view === view);
+      });
+
+      const inputView = document.getElementById("input-view");
+      const todoView = document.getElementById("todo-view");
+
+      if (view === "input") {
+        inputView.classList.remove("hidden");
+        todoView.classList.remove("active");
+        focusInput();
+      } else {
+        inputView.classList.add("hidden");
+        todoView.classList.add("active");
+        loadTodos();
+      }
+    }
+
+    /* ── todo view ──────────────────────────────────── */
+
+    async function loadTodos() {
+      const list = document.getElementById("todo-list");
+      const count = document.getElementById("todo-count");
+
+      list.innerHTML = '<div class="todo-empty">Loading…</div>';
+      count.textContent = "";
+
+      try {
+        const data = await fetchItems("todo", "pending");
+        const items = data.items || [];
+        count.textContent = items.length === 1 ? "1 todo" : `${items.length} todos`;
+        renderTodoList(items);
+      } catch (err) {
+        count.textContent = "";
+        list.innerHTML = `<div class="todo-error">Cannot load todos: ${esc(err.message)}</div>`;
+      }
+    }
+
+    function renderTodoList(items) {
+      const list = document.getElementById("todo-list");
+
+      if (items.length === 0) {
+        list.innerHTML = '<div class="todo-empty">No pending todos.</div>';
+        return;
+      }
+
+      list.innerHTML = items.map(t =>
+        `<div class="todo-row" data-id="${esc(t.id)}" data-content="${esc(t.content)}">
+          <div class="todo-checkbox"></div>
+          <div class="todo-text">${esc(t.content)}</div>
+        </div>`
+      ).join("");
+    }
+
+    async function completeTodo(row) {
+      const content = row.dataset.content;
+      const checkbox = row.querySelector(".todo-checkbox");
+      const text = row.querySelector(".todo-text");
+
+      checkbox.classList.add("completing");
+      text.classList.add("completing");
+
+      try {
+        await postInput(`/todo done ${content}`);
+        setTimeout(loadTodos, 300);
+      } catch {
+        checkbox.classList.remove("completing");
+        text.classList.remove("completing");
+      }
     }
 
     /* ── response renderers ─────────────────────────── */
@@ -369,7 +610,9 @@
       try {
         const { getCurrentWindow } = window.__TAURI__.window;
         await getCurrentWindow().hide();
-      } catch {}
+      } catch (err) {
+        console.error("hideWindow failed:", err);
+      }
     }
 
     function handleKeydown(e) {
@@ -388,8 +631,26 @@
     document.addEventListener("DOMContentLoaded", () => {
       document.getElementById("input").addEventListener("keydown", handleKeydown);
 
+      document.querySelectorAll(".tab").forEach(tab => {
+        tab.addEventListener("click", () => switchView(tab.dataset.view));
+      });
+
+      document.getElementById("todo-list").addEventListener("click", (e) => {
+        const row = e.target.closest(".todo-row");
+        if (row && !row.querySelector(".completing")) completeTodo(row);
+      });
+
+      document.getElementById("todo-refresh").addEventListener("click", loadTodos);
+
+      document.addEventListener("keydown", (e) => {
+        if (e.key === "Escape") { e.preventDefault(); hideWindow(); }
+      });
+
       document.addEventListener("visibilitychange", () => {
-        if (!document.hidden) focusInput();
+        if (!document.hidden) {
+          if (activeView === "input") focusInput();
+          if (activeView === "todos") loadTodos();
+        }
       });
 
       pollHealth();
