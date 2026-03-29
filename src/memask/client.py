@@ -38,6 +38,12 @@ class DaemonClient:
     def suggest(self, query: str, *, limit: int = 10) -> dict:
         return self._get("/suggest", {"q": query, "limit": str(limit)})
 
+    def patch_item(self, item_id: str, **fields) -> dict:
+        return self._patch(f"/items/{item_id}", fields)
+
+    def delete_item(self, item_id: str) -> dict:
+        return self._delete(f"/items/{item_id}")
+
     def settings(self) -> dict:
         return self._get("/settings")
 
@@ -57,6 +63,22 @@ class DaemonClient:
             headers={"Content-Type": "application/json"},
             method="POST",
         )
+        return self._request(req)
+
+    def _patch(self, path: str, body: dict) -> dict:
+        url = self._base_url + path
+        data = json.dumps(body).encode()
+        req = urllib.request.Request(
+            url,
+            data=data,
+            headers={"Content-Type": "application/json"},
+            method="PATCH",
+        )
+        return self._request(req)
+
+    def _delete(self, path: str) -> dict:
+        url = self._base_url + path
+        req = urllib.request.Request(url, method="DELETE")
         return self._request(req)
 
     def _request(self, url_or_req) -> dict:

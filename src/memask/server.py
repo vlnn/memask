@@ -19,7 +19,7 @@ def create_app(app_context: AppContext) -> Flask:
     def cors_headers(response):
         response.headers["Access-Control-Allow-Origin"] = "*"
         response.headers["Access-Control-Allow-Headers"] = "Content-Type"
-        response.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
+        response.headers["Access-Control-Allow-Methods"] = "GET, POST, PATCH, DELETE, OPTIONS"
         return response
 
     @app.errorhandler(Exception)
@@ -33,6 +33,8 @@ def create_app(app_context: AppContext) -> Flask:
     app.add_url_rule("/health", view_func=_health, methods=["GET"])
     app.add_url_rule("/input", view_func=_input, methods=["POST"])
     app.add_url_rule("/items", view_func=_items, methods=["GET"])
+    app.add_url_rule("/items/<item_id>", view_func=_patch_item, methods=["PATCH"])
+    app.add_url_rule("/items/<item_id>", view_func=_delete_item, methods=["DELETE"])
     app.add_url_rule("/search", view_func=_search, methods=["GET"])
     app.add_url_rule("/suggest", view_func=_suggest, methods=["GET"])
     app.add_url_rule("/settings", view_func=_settings, methods=["GET"])
@@ -131,6 +133,39 @@ def _suggest():
     svc = _get_svc()
     results = suggest(svc.conn, query, limit=limit_int)
     return jsonify({"suggestions": results})
+
+
+def _patch_item(item_id):
+    from memask.repository.items import VALID_TYPES, get_item, update_item
+
+    svc = _get_svc()
+
+    existing = get_item(svc.conn, item_id)
+    if not existing or existing.deleted_at is not None:
+        return jsonify({"error": "item not found"}), 404
+
+    body = request.get_json(silent=True) or {}
+
+    if "type" in body and body["type"] not in VALID_TYPES:
+        return jsonify({"error": f"invalid type: {body['type']}"}), 400
+
+    fields = {}
+    for key in ("content", "type", "status", "title", "category", "tags", "priority"):
+        if key in body:
+            fields[key] = body[key]
+
+    updated = update_item(svc.conn, item_id, **fields)
+    return jsonify({"item": _serialize_item(updated)})
+
+
+def _delete_item(item_id):
+    from memask.repository.items import soft_delete_item
+
+    svc = _get_svc()
+    deleted = soft_delete_item(svc.conn, item_id)
+    if not deleted:
+        return jsonify({"error": "item not found"}), 404
+    return jsonify({"deleted": True, "id": item_id})
 
 
 def _settings():

@@ -232,6 +232,21 @@
       opacity: 0.7;
     }
 
+    #input-row.edit-mode #input-icon {
+      color: var(--accent);
+      font-size: 14px;
+    }
+
+    #edit-hint {
+      display: none;
+      font-size: 10px;
+      color: var(--text-faint);
+      white-space: nowrap;
+      flex-shrink: 0;
+    }
+
+    #input-row.edit-mode #edit-hint { display: block; }
+
     #response {
       flex: 1;
       overflow-y: auto;
@@ -643,6 +658,7 @@
       <div id="input-row" style="position:relative">
         <div id="input-icon">›</div>
         <input id="input" type="text" placeholder="Type a thought, question, or command…" autofocus spellcheck="false">
+        <span id="edit-hint">⏎ save · ⇧⏎ copy · ←prefix cmd · esc cancel</span>
         <div id="spinner"></div>
         <div id="suggest-dropdown"></div>
       </div>
@@ -1148,6 +1164,9 @@
     let suggestItems = [];
     let suggestDebounce = null;
 
+    let editItemId = null;
+    let editItemType = null;
+
     async function fetchSuggestions(query) {
       const url = `${DAEMON}/suggest?q=${encodeURIComponent(query)}&limit=10`;
       const resp = await fetch(url);
@@ -1200,8 +1219,37 @@
       const input = document.getElementById("input");
       input.value = item.text;
       closeSuggest();
+
+      if (item.kind === "item" && item.id) {
+        enterEditMode(item.id, item.item_type);
+      } else {
+        input.focus();
+        input.setSelectionRange(input.value.length, input.value.length);
+      }
+    }
+
+    function enterEditMode(itemId, itemType) {
+      editItemId = itemId;
+      editItemType = itemType || null;
+      const row = document.getElementById("input-row");
+      const icon = document.getElementById("input-icon");
+      const input = document.getElementById("input");
+      row.classList.add("edit-mode");
+      icon.textContent = "✎";
       input.focus();
       input.setSelectionRange(input.value.length, input.value.length);
+    }
+
+    function exitEditMode() {
+      editItemId = null;
+      editItemType = null;
+      const row = document.getElementById("input-row");
+      const icon = document.getElementById("input-icon");
+      const input = document.getElementById("input");
+      row.classList.remove("edit-mode");
+      icon.textContent = "›";
+      input.value = "";
+      input.focus();
     }
 
     function navigateSuggest(direction) {
@@ -1226,12 +1274,98 @@
       }, 150);
     }
 
+    async function patchItem(itemId, fields) {
+      const resp = await fetch(`${DAEMON}/items/${itemId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(fields),
+      });
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      return resp.json();
+    }
+
+    async function deleteItem(itemId) {
+      const resp = await fetch(`${DAEMON}/items/${itemId}`, { method: "DELETE" });
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      return resp.json();
+    }
+
+    function parseEditPrefix(text) {
+      const t = text.trimStart();
+      if (/^\/delete\b/i.test(t)) return { action: "delete" };
+      const retypeMatch = t.match(/^\/retype\s+(note|todo|url|decision|guide)\b/i);
+      if (retypeMatch) return { action: "retype", type: retypeMatch[1].toLowerCase() };
+      if (/^\/done\b/i.test(t)) return { action: "done" };
+      if (/^\/undone\b/i.test(t)) return { action: "undone" };
+      return { action: "edit", content: text };
+    }
+
+    async function handleEditAction() {
+      const input = document.getElementById("input");
+      const text = input.value.trim();
+      if (!text && !editItemId) return;
+
+      const parsed = parseEditPrefix(text);
+      const itemId = editItemId;
+
+      exitEditMode();
+      clearResponse();
+      showSpinner();
+
+      try {
+        let result;
+        switch (parsed.action) {
+          case "delete":
+            await deleteItem(itemId);
+            result = { action: "deleted", data: {} };
+            setResponse(`<div class="msg msg-success"><span class="check">✓</span><span>Deleted.</span></div>`);
+            break;
+          case "retype": {
+            const fields = { type: parsed.type };
+            if (parsed.type === "todo") fields.status = "pending";
+            const res = await patchItem(itemId, fields);
+            setResponse(`<div class="msg msg-success"><span class="check">✓</span><span>Retyped to ${esc(parsed.type)}.</span></div>`);
+            break;
+          }
+          case "done":
+            await patchItem(itemId, { status: "done" });
+            setResponse(`<div class="msg msg-success"><span class="check">✓</span><span>Marked as done.</span></div>`);
+            break;
+          case "undone":
+            await patchItem(itemId, { status: "pending" });
+            setResponse(`<div class="msg msg-success"><span class="check">↩</span><span>Reopened.</span></div>`);
+            break;
+          default:
+            await patchItem(itemId, { content: parsed.content });
+            setResponse(`<div class="msg msg-success"><span class="check">✓</span><span>Updated.</span></div>`);
+        }
+      } catch (err) {
+        setResponse(renderError(err.message));
+      } finally {
+        hideSpinner();
+      }
+    }
+
+    async function copyToClipboard(text) {
+      try {
+        await navigator.clipboard.writeText(text);
+        setResponse(`<div class="msg hint">Copied to clipboard.</div>`);
+      } catch {
+        setResponse(renderError("Failed to copy."));
+      }
+    }
+
     /* ── event handling ─────────────────────────────── */
 
     async function handleSubmit() {
       const input = document.getElementById("input");
       const text = input.value.trim();
       if (!text) return;
+
+      if (editItemId) {
+        await handleEditAction();
+        return;
+      }
 
       input.value = "";
       closeSuggest();
@@ -1284,6 +1418,35 @@
         }
         if (e.key === "Escape") { e.preventDefault(); closeSuggest(); return; }
         liveSuggestFilter();
+        return;
+      }
+
+      if (editItemId) {
+        if (e.key === "Enter" && e.shiftKey) {
+          e.preventDefault();
+          const text = document.getElementById("input").value;
+          copyToClipboard(text);
+          exitEditMode();
+          return;
+        }
+        if (e.key === "Enter") {
+          e.preventDefault();
+          handleEditAction();
+          return;
+        }
+        if (e.key === "ArrowLeft") {
+          const input = document.getElementById("input");
+          if (input.selectionStart === 0 && input.selectionEnd === 0) {
+            e.preventDefault();
+            input.setSelectionRange(0, 0);
+          }
+          return;
+        }
+        if (e.key === "Escape") {
+          e.preventDefault();
+          exitEditMode();
+          return;
+        }
         return;
       }
 
