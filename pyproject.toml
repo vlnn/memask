@@ -7,6 +7,7 @@ dependencies = [
     "sentence-transformers>=3.0",
     "lancedb>=0.15",
     "pyarrow>=17.0",
+    "llama-cpp-python>=0.3.19",
 ]
 
 [project.scripts]

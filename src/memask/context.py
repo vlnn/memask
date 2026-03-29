@@ -25,10 +25,16 @@ class LLM(Protocol):
     def is_available(self) -> bool: ...
 
 
+@runtime_checkable
+class Reranker(Protocol):
+    def score_pairs(self, pairs: list[tuple[str, str]]) -> list[float]: ...
+
+
 @dataclass
 class ServiceContext:
     conn: sqlite3.Connection
     store: Any | None = None
     embedder: Embedder | None = None
     llm: LLM | None = None
+    reranker: Reranker | None = None
     session: Any | None = None

@@ -34,3 +34,39 @@ class FakeEmbeddingService:
         if norm > 0:
             vec = vec / norm
         return vec
+
+
+class FakeLLM:
+    def __init__(
+        self,
+        response: str = "This is a test response.",
+        available: bool = True,
+        responses: list[str] | None = None,
+    ):
+        self._responses = responses or [response]
+        self._call_index = 0
+        self._available = available
+        self.call_log: list[dict] = []
+
+    def generate(self, prompt: str, *, system: str | None = None) -> str:
+        self.call_log.append({"prompt": prompt, "system": system})
+        idx = min(self._call_index, len(self._responses) - 1)
+        self._call_index += 1
+        return self._responses[idx]
+
+    def is_available(self) -> bool:
+        return self._available
+
+
+class FakeReranker:
+    def score_pairs(self, pairs: list[tuple[str, str]]) -> list[float]:
+        return [self._word_overlap_score(a, b) for a, b in pairs]
+
+    def _word_overlap_score(self, text_a: str, text_b: str) -> float:
+        words_a = set(text_a.lower().split())
+        words_b = set(text_b.lower().split())
+        if not words_a or not words_b:
+            return 0.0
+        overlap = len(words_a & words_b)
+        total = len(words_a | words_b)
+        return overlap / total if total > 0 else 0.0
