@@ -305,6 +305,56 @@
 
     #status-dot.ok { background: #8bcc8b; }
     #status-dot.err { background: #cc8b8b; }
+
+    /* ── setup banner ──────────────────────────────── */
+
+    #setup-banner {
+      display: none;
+      flex-shrink: 0;
+      padding: 10px 16px;
+      font-size: 13px;
+      line-height: 1.5;
+      border-bottom: 1px solid #2a2a36;
+    }
+
+    #setup-banner.active { display: block; }
+
+    #setup-banner.warn {
+      background: #1e1c14;
+      color: #ccb86e;
+    }
+
+    #setup-banner.err {
+      background: #1e1416;
+      color: #cc8b8b;
+    }
+
+    .banner-title {
+      font-weight: 600;
+      margin-bottom: 2px;
+    }
+
+    .banner-cmd {
+      font-family: "SF Mono", "Fira Code", "Consolas", monospace;
+      font-size: 12px;
+      background: rgba(255, 255, 255, 0.06);
+      padding: 2px 6px;
+      border-radius: 3px;
+    }
+
+    .banner-dismiss {
+      float: right;
+      background: none;
+      border: none;
+      color: inherit;
+      cursor: pointer;
+      opacity: 0.5;
+      font-size: 14px;
+      padding: 0 0 0 8px;
+      line-height: 1;
+    }
+
+    .banner-dismiss:hover { opacity: 1; }
   </style>
 </head>
 <body>
@@ -315,6 +365,8 @@
       <div class="tab active" data-view="input">Input</div>
       <div class="tab" data-view="todos">Todos</div>
     </div>
+
+    <div id="setup-banner"></div>
 
     <div id="input-view">
       <div id="input-row">
@@ -571,14 +623,65 @@
       label.textContent = text;
     }
 
+    let _healthTimer = null;
+    let _daemonSeen = false;
+
+    function schedulePoll(ms) {
+      if (_healthTimer) clearInterval(_healthTimer);
+      _healthTimer = setInterval(pollHealth, ms);
+    }
+
     async function pollHealth() {
       try {
         const h = await fetchHealth();
-        const llm = h.llm?.available ? "LLM ready" : "no LLM";
+        const llmOk = h.llm?.available;
+        const llm = llmOk ? "LLM ready" : "no LLM";
         setStatus(true, `connected · ${llm}`);
+
+        if (!_daemonSeen) {
+          _daemonSeen = true;
+          schedulePoll(15000);
+        }
+
+        if (!llmOk) {
+          showBanner("warn", "LLM model not installed", "Questions will return search results instead of synthesized answers. To enable answers, run:", "memask model download");
+        } else {
+          hideBanner();
+        }
       } catch {
         setStatus(false, "daemon offline");
+        showBanner("err", "Daemon is not running", "Start the daemon to use Memory:", "memask serve");
+
+        if (_daemonSeen) {
+          _daemonSeen = false;
+          schedulePoll(3000);
+        }
       }
+    }
+
+    /* ── setup banner ──────────────────────────────── */
+
+    let bannerDismissed = null;
+
+    function showBanner(level, title, detail, cmd) {
+      if (bannerDismissed === `${level}:${cmd}`) return;
+
+      const el = document.getElementById("setup-banner");
+      el.className = `active ${level}`;
+      el.innerHTML = `<button class="banner-dismiss" title="Dismiss">×</button>` +
+        `<div class="banner-title">${esc(title)}</div>` +
+        `<div>${esc(detail)} <span class="banner-cmd">${esc(cmd)}</span></div>`;
+
+      el.querySelector(".banner-dismiss").addEventListener("click", () => {
+        bannerDismissed = `${level}:${cmd}`;
+        hideBanner();
+      });
+    }
+
+    function hideBanner() {
+      const el = document.getElementById("setup-banner");
+      el.className = "";
+      el.innerHTML = "";
     }
 
     /* ── event handling ─────────────────────────────── */
@@ -654,7 +757,7 @@
       });
 
       pollHealth();
-      setInterval(pollHealth, 15000);
+      schedulePoll(3000);
     });
   </script>
 </body>
