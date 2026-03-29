@@ -4,12 +4,17 @@ from memask.router.intents import Confidence, Intent, RoutingResult
 from memask.router.query_understanding import extract_query_context
 
 TODO_PREFIX = re.compile(r"^/todo\b", re.I)
+TODO_BARE = re.compile(r"^/todo\s*$", re.I)
 TODO_LIST_SUFFIX = re.compile(r"^/todo\s+(?:list|ls)\s*$", re.I)
 TODO_DONE_SUFFIX = re.compile(r"^/todo\s+(?:done|complete)\s+", re.I)
 TODO_ADD_SUFFIX = re.compile(r"^/todo\s+(?:add\s+)?", re.I)
 
+DONE_PREFIX = re.compile(r"^/done\s+", re.I)
+DONE_BARE = re.compile(r"^/done\s*$", re.I)
+UNDONE_PREFIX = re.compile(r"^/undone\s+", re.I)
+
 APP_BANG = re.compile(r"^!", re.I)
-APP_SLASH = re.compile(r"^/(?!todo\b)(\w+)", re.I)
+APP_SLASH = re.compile(r"^/(?!todo\b|done\b|undone\b)(\w+)", re.I)
 QUESTION_PREFIX = re.compile(r"^\?", re.I)
 
 QUESTION_STARTERS = re.compile(
@@ -45,11 +50,23 @@ def classify_by_rules(text: str) -> RoutingResult:
     if TODO_LIST_SUFFIX.match(stripped):
         return _result(Intent.TODO_LIST, Confidence.HIGH, text, ctx)
 
+    if TODO_BARE.match(stripped):
+        return _result(Intent.TODO_LIST, Confidence.HIGH, text, ctx)
+
     if TODO_DONE_SUFFIX.match(stripped):
         return _result(Intent.TODO_COMPLETE, Confidence.HIGH, text, ctx)
 
     if TODO_PREFIX.match(stripped):
         return _result(Intent.TODO_CREATE, Confidence.HIGH, text, ctx)
+
+    if DONE_PREFIX.match(stripped):
+        return _result(Intent.TODO_COMPLETE, Confidence.HIGH, text, ctx)
+
+    if DONE_BARE.match(stripped):
+        return _result(Intent.APP_COMMAND, Confidence.HIGH, text, ctx)
+
+    if UNDONE_PREFIX.match(stripped):
+        return _result(Intent.APP_COMMAND, Confidence.HIGH, text, ctx)
 
     if APP_BANG.match(stripped):
         return _result(Intent.APP_COMMAND, Confidence.HIGH, text, ctx)

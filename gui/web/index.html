@@ -4,12 +4,70 @@
   <meta charset="utf-8">
   <title>Memory</title>
   <style>
+    :root {
+      --bg:           #16161e;
+      --text:         #c8c8d0;
+      --text-strong:  #e8e8ee;
+      --text-muted:   #5a5a6e;
+      --text-faint:   #3e3e4e;
+      --border:       #2a2a36;
+      --border-light: #1e1e28;
+      --hover-bg:     #1c1c26;
+      --accent:       #8b8bf5;
+      --success:      #8bcc8b;
+      --error:        #cc8b8b;
+      --warn:         #ccb86e;
+      --icon-muted:   #7a7a8c;
+      --spinner-bg:   #3a3a4a;
+      --scroll-thumb: #2a2a36;
+      --code-bg:      rgba(255, 255, 255, 0.06);
+      --banner-warn-bg:  #1e1c14;
+      --banner-err-bg:   #1e1416;
+      --tag-note-bg:  #1e2a1e;
+      --tag-note-fg:  #8bcc8b;
+      --tag-todo-bg:  #2a1e2a;
+      --tag-todo-fg:  #b88bcb;
+      --tag-other-bg: #1e1e2a;
+      --tag-other-fg: #8b8bf5;
+      --check-bg:     #16161e;
+      --completing-text: #5a5a6e;
+    }
+
+    [data-theme="light"] {
+      --bg:           #ffffff;
+      --text:         #3a3a4a;
+      --text-strong:  #1a1a2a;
+      --text-muted:   #7a7a8c;
+      --text-faint:   #b0b0bc;
+      --border:       #e2e2ea;
+      --border-light: #eeeef2;
+      --hover-bg:     #f5f5f8;
+      --accent:       #6b6bf0;
+      --success:      #4a9a4a;
+      --error:        #c05050;
+      --warn:         #a08820;
+      --icon-muted:   #9a9aac;
+      --spinner-bg:   #d0d0da;
+      --scroll-thumb: #d0d0da;
+      --code-bg:      rgba(0, 0, 0, 0.05);
+      --banner-warn-bg:  #fdf8e8;
+      --banner-err-bg:   #fde8e8;
+      --tag-note-bg:  #e8f5e8;
+      --tag-note-fg:  #2a7a2a;
+      --tag-todo-bg:  #f0e8f5;
+      --tag-todo-fg:  #7a3a9a;
+      --tag-other-bg: #e8e8f5;
+      --tag-other-fg: #4a4af0;
+      --check-bg:     #ffffff;
+      --completing-text: #b0b0bc;
+    }
+
     * { margin: 0; padding: 0; box-sizing: border-box; }
 
     body {
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Inter", sans-serif;
-      background: #16161e;
-      color: #c8c8d0;
+      background: var(--bg);
+      color: var(--text);
       height: 100vh;
       overflow: hidden;
       border-radius: 12px;
@@ -32,7 +90,7 @@
     #tab-bar {
       display: flex;
       flex-shrink: 0;
-      border-bottom: 1px solid #2a2a36;
+      border-bottom: 1px solid var(--border);
       padding: 0 16px;
       gap: 0;
     }
@@ -40,15 +98,17 @@
     .tab {
       padding: 8px 14px;
       font-size: 13px;
-      color: #5a5a6e;
+      color: var(--text-muted);
       cursor: pointer;
       border-bottom: 2px solid transparent;
       transition: color 0.15s, border-color 0.15s;
       user-select: none;
     }
 
-    .tab:hover { color: #9a9ab0; }
-    .tab.active { color: #c8c8d0; border-bottom-color: #8b8bf5; }
+    .tab:hover { color: var(--text); }
+    .tab.active { color: var(--text-strong); border-bottom-color: var(--accent); }
+
+    .tab-spacer { flex: 1; }
 
     /* ── input view ─────────────────────────────────── */
 
@@ -60,13 +120,13 @@
       align-items: center;
       padding: 12px 16px;
       gap: 10px;
-      border-bottom: 1px solid #2a2a36;
+      border-bottom: 1px solid var(--border);
       flex-shrink: 0;
     }
 
     #input-icon {
       font-size: 18px;
-      color: #7a7a8c;
+      color: var(--icon-muted);
       flex-shrink: 0;
       width: 20px;
       text-align: center;
@@ -77,20 +137,20 @@
       background: transparent;
       border: none;
       outline: none;
-      color: #e8e8ee;
+      color: var(--text-strong);
       font-size: 16px;
       font-family: inherit;
-      caret-color: #8b8bf5;
+      caret-color: var(--accent);
     }
 
-    #input::placeholder { color: #5a5a6e; }
+    #input::placeholder { color: var(--text-muted); }
 
     #spinner {
       display: none;
       width: 16px;
       height: 16px;
-      border: 2px solid #3a3a4a;
-      border-top-color: #8b8bf5;
+      border: 2px solid var(--spinner-bg);
+      border-top-color: var(--accent);
       border-radius: 50%;
       animation: spin 0.6s linear infinite;
       flex-shrink: 0;
@@ -105,7 +165,7 @@
       overflow-y: auto;
       padding: 12px 16px;
       scrollbar-width: thin;
-      scrollbar-color: #2a2a36 transparent;
+      scrollbar-color: var(--scroll-thumb) transparent;
     }
 
     #response:empty { display: none; }
@@ -120,19 +180,19 @@
       align-items: center;
       justify-content: space-between;
       padding: 10px 16px;
-      border-bottom: 1px solid #2a2a36;
+      border-bottom: 1px solid var(--border);
       flex-shrink: 0;
     }
 
     #todo-count {
       font-size: 13px;
-      color: #5a5a6e;
+      color: var(--text-muted);
     }
 
-    #todo-refresh {
+    .refresh-btn {
       background: none;
-      border: 1px solid #2a2a36;
-      color: #7a7a8c;
+      border: 1px solid var(--border);
+      color: var(--icon-muted);
       font-size: 12px;
       padding: 3px 10px;
       border-radius: 4px;
@@ -140,14 +200,14 @@
       font-family: inherit;
     }
 
-    #todo-refresh:hover { color: #c8c8d0; border-color: #3a3a4a; }
+    .refresh-btn:hover { color: var(--text-strong); border-color: var(--spinner-bg); }
 
     #todo-list {
       flex: 1;
       overflow-y: auto;
       padding: 4px 0;
       scrollbar-width: thin;
-      scrollbar-color: #2a2a36 transparent;
+      scrollbar-color: var(--scroll-thumb) transparent;
     }
 
     .todo-row {
@@ -155,71 +215,200 @@
       align-items: center;
       gap: 10px;
       padding: 10px 16px;
-      border-bottom: 1px solid #1e1e28;
+      border-bottom: 1px solid var(--border-light);
       cursor: pointer;
       transition: background 0.1s;
     }
 
-    .todo-row:hover { background: #1c1c26; }
+    .todo-row:hover { background: var(--hover-bg); }
     .todo-row:last-child { border-bottom: none; }
 
     .todo-checkbox {
       width: 18px;
       height: 18px;
-      border: 2px solid #3a3a4a;
+      border: 2px solid var(--spinner-bg);
       border-radius: 50%;
       flex-shrink: 0;
       display: flex;
       align-items: center;
       justify-content: center;
+      cursor: pointer;
       transition: border-color 0.15s, background 0.15s;
     }
 
-    .todo-row:hover .todo-checkbox { border-color: #8b8bf5; }
+    .todo-row:hover .todo-checkbox { border-color: var(--accent); }
 
-    .todo-checkbox.completing {
-      border-color: #8bcc8b;
-      background: #8bcc8b;
+    .todo-row .todo-checkbox.completing {
+      border-color: var(--success);
+      background: var(--success);
     }
 
-    .todo-checkbox.completing::after {
+    .todo-row .todo-checkbox.completing::after {
       content: "✓";
-      color: #16161e;
+      color: var(--check-bg);
       font-size: 11px;
       font-weight: bold;
     }
 
     .todo-text {
       flex: 1;
-      color: #d0d0d8;
+      color: var(--text-strong);
       font-size: 14px;
       line-height: 1.4;
     }
 
     .todo-text.completing {
-      color: #5a5a6e;
+      color: var(--completing-text);
       text-decoration: line-through;
     }
 
     .todo-empty {
       padding: 32px 16px;
       text-align: center;
-      color: #3e3e4e;
+      color: var(--text-faint);
       font-size: 14px;
     }
 
     .todo-error {
       padding: 16px;
-      color: #cc8b8b;
+      color: var(--error);
       font-size: 13px;
     }
+
+    /* ── recent view ────────────────────────────────── */
+
+    #recent-view { display: none; flex-direction: column; flex: 1; min-height: 0; }
+    #recent-view.active { display: flex; }
+
+    #recent-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 10px 16px;
+      border-bottom: 1px solid var(--border);
+      flex-shrink: 0;
+    }
+
+    #recent-count {
+      font-size: 13px;
+      color: var(--text-muted);
+    }
+
+    #recent-list {
+      flex: 1;
+      overflow-y: auto;
+      padding: 4px 0;
+      scrollbar-width: thin;
+      scrollbar-color: var(--scroll-thumb) transparent;
+    }
+
+    .recent-row {
+      padding: 10px 16px;
+      border-bottom: 1px solid var(--border-light);
+    }
+
+    .recent-row:last-child { border-bottom: none; }
+
+    .recent-content { color: var(--text-strong); font-size: 14px; line-height: 1.4; }
+
+    .recent-meta {
+      font-size: 12px;
+      color: var(--text-muted);
+      margin-top: 2px;
+    }
+
+    .recent-type {
+      display: inline-block;
+      padding: 1px 6px;
+      border-radius: 3px;
+      font-size: 11px;
+      margin-right: 6px;
+    }
+
+    .recent-type.note { background: var(--tag-note-bg); color: var(--tag-note-fg); }
+    .recent-type.todo { background: var(--tag-todo-bg); color: var(--tag-todo-fg); }
+    .recent-type.other { background: var(--tag-other-bg); color: var(--tag-other-fg); }
+
+    .recent-empty {
+      padding: 32px 16px;
+      text-align: center;
+      color: var(--text-faint);
+      font-size: 14px;
+    }
+
+    /* ── settings view ──────────────────────────────── */
+
+    #settings-view { display: none; flex-direction: column; flex: 1; min-height: 0; }
+    #settings-view.active { display: flex; }
+
+    .settings-content {
+      flex: 1;
+      overflow-y: auto;
+      padding: 16px;
+    }
+
+    .settings-section {
+      margin-bottom: 20px;
+    }
+
+    .settings-section-title {
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--text-muted);
+      margin-bottom: 10px;
+    }
+
+    .settings-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 10px 0;
+      border-bottom: 1px solid var(--border-light);
+    }
+
+    .settings-row:last-child { border-bottom: none; }
+
+    .settings-label {
+      font-size: 14px;
+      color: var(--text-strong);
+    }
+
+    .settings-desc {
+      font-size: 12px;
+      color: var(--text-muted);
+      margin-top: 2px;
+    }
+
+    .theme-switcher {
+      display: flex;
+      gap: 0;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      overflow: hidden;
+    }
+
+    .theme-btn {
+      padding: 5px 12px;
+      font-size: 12px;
+      font-family: inherit;
+      border: none;
+      cursor: pointer;
+      background: transparent;
+      color: var(--text-muted);
+      transition: background 0.15s, color 0.15s;
+    }
+
+    .theme-btn:not(:last-child) { border-right: 1px solid var(--border); }
+    .theme-btn:hover { color: var(--text-strong); }
+    .theme-btn.active { background: var(--accent); color: #fff; }
 
     /* ── shared response styles ─────────────────────── */
 
     .msg { padding: 6px 0; line-height: 1.5; }
 
     .msg-success {
-      color: #8bcc8b;
+      color: var(--success);
       display: flex;
       align-items: baseline;
       gap: 8px;
@@ -228,36 +417,43 @@
     .msg-success .check { flex-shrink: 0; }
 
     .msg-error {
-      color: #cc8b8b;
+      color: var(--error);
       display: flex;
       align-items: baseline;
       gap: 8px;
     }
 
-    .msg-answer { color: #e0e0e8; }
+    .msg-answer { color: var(--text-strong); }
 
     .sources {
       margin-top: 8px;
       font-size: 13px;
-      color: #6a6a7e;
+      color: var(--text-muted);
     }
 
-    .sources span { color: #8b8bf5; }
+    .sources span { color: var(--accent); }
+
+    .source-num {
+      color: var(--accent);
+      font-size: 12px;
+      font-weight: 600;
+      margin-right: 4px;
+    }
 
     .result-list { list-style: none; }
 
     .result-item {
       padding: 8px 0;
-      border-bottom: 1px solid #1e1e28;
+      border-bottom: 1px solid var(--border-light);
     }
 
     .result-item:last-child { border-bottom: none; }
 
-    .result-content { color: #d0d0d8; }
+    .result-content { color: var(--text-strong); }
 
     .result-meta {
       font-size: 12px;
-      color: #5a5a6e;
+      color: var(--text-muted);
       margin-top: 2px;
     }
 
@@ -269,15 +465,15 @@
     }
 
     .todo-bullet {
-      color: #8b8bf5;
+      color: var(--accent);
       flex-shrink: 0;
     }
 
-    .todo-content { color: #d0d0d8; }
+    .todo-content { color: var(--text-strong); }
 
     .hint {
       font-size: 12px;
-      color: #3e3e4e;
+      color: var(--text-faint);
       padding: 8px 0;
     }
 
@@ -287,10 +483,10 @@
       flex-shrink: 0;
       padding: 4px 16px;
       font-size: 11px;
-      color: #3e3e4e;
+      color: var(--text-faint);
       display: flex;
       justify-content: space-between;
-      border-top: 1px solid #1e1e28;
+      border-top: 1px solid var(--border-light);
     }
 
     #status-dot {
@@ -298,13 +494,13 @@
       width: 6px;
       height: 6px;
       border-radius: 50%;
-      background: #3e3e4e;
+      background: var(--text-faint);
       margin-right: 4px;
       vertical-align: middle;
     }
 
-    #status-dot.ok { background: #8bcc8b; }
-    #status-dot.err { background: #cc8b8b; }
+    #status-dot.ok { background: var(--success); }
+    #status-dot.err { background: var(--error); }
 
     /* ── setup banner ──────────────────────────────── */
 
@@ -314,19 +510,19 @@
       padding: 10px 16px;
       font-size: 13px;
       line-height: 1.5;
-      border-bottom: 1px solid #2a2a36;
+      border-bottom: 1px solid var(--border);
     }
 
     #setup-banner.active { display: block; }
 
     #setup-banner.warn {
-      background: #1e1c14;
-      color: #ccb86e;
+      background: var(--banner-warn-bg);
+      color: var(--warn);
     }
 
     #setup-banner.err {
-      background: #1e1416;
-      color: #cc8b8b;
+      background: var(--banner-err-bg);
+      color: var(--error);
     }
 
     .banner-title {
@@ -337,7 +533,7 @@
     .banner-cmd {
       font-family: "SF Mono", "Fira Code", "Consolas", monospace;
       font-size: 12px;
-      background: rgba(255, 255, 255, 0.06);
+      background: var(--code-bg);
       padding: 2px 6px;
       border-radius: 3px;
     }
@@ -364,6 +560,9 @@
     <div id="tab-bar">
       <div class="tab active" data-view="input">Input</div>
       <div class="tab" data-view="todos">Todos</div>
+      <div class="tab" data-view="recent">Recent</div>
+      <div class="tab-spacer"></div>
+      <div class="tab" data-view="settings">⚙</div>
     </div>
 
     <div id="setup-banner"></div>
@@ -380,19 +579,90 @@
     <div id="todo-view">
       <div id="todo-header">
         <span id="todo-count"></span>
-        <button id="todo-refresh">refresh</button>
+        <button class="refresh-btn" id="todo-refresh">refresh</button>
       </div>
       <div id="todo-list"></div>
     </div>
 
+    <div id="recent-view">
+      <div id="recent-header">
+        <span id="recent-count"></span>
+        <button class="refresh-btn" id="recent-refresh">refresh</button>
+      </div>
+      <div id="recent-list"></div>
+    </div>
+
+    <div id="settings-view">
+      <div class="settings-content">
+        <div class="settings-section">
+          <div class="settings-section-title">Appearance</div>
+          <div class="settings-row">
+            <div>
+              <div class="settings-label">Theme</div>
+              <div class="settings-desc">Switch between dark and light mode</div>
+            </div>
+            <div class="theme-switcher" id="theme-switcher">
+              <button class="theme-btn" data-theme="dark">Dark</button>
+              <button class="theme-btn" data-theme="light">Light</button>
+              <button class="theme-btn" data-theme="auto">Auto</button>
+            </div>
+          </div>
+        </div>
+        <div class="settings-section">
+          <div class="settings-section-title">Info</div>
+          <div class="settings-row">
+            <div>
+              <div class="settings-label">Daemon</div>
+              <div class="settings-desc">http://127.0.0.1:7394</div>
+            </div>
+          </div>
+          <div class="settings-row">
+            <div>
+              <div class="settings-label">Hotkey</div>
+              <div class="settings-desc">⌘⇧Space</div>
+            </div>
+          </div>
+          <div class="settings-row">
+            <div>
+              <div class="settings-label">Version</div>
+              <div class="settings-desc">0.1.0</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <div id="status-bar">
       <span><span id="status-dot"></span><span id="status-text">starting…</span></span>
-      <span>⌘⇧Space to toggle · Esc to hide</span>
+      <span>⌘⇧Space toggle · ⌘1-4 tabs · Esc hide</span>
     </div>
   </div>
 
   <script>
     const DAEMON = "http://127.0.0.1:7394";
+
+    /* ── theme ──────────────────────────────────────── */
+
+    function applyTheme(choice) {
+      let effective = choice;
+      if (choice === "auto") {
+        effective = window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
+      }
+      document.documentElement.setAttribute("data-theme", effective);
+
+      document.querySelectorAll(".theme-btn").forEach(btn => {
+        btn.classList.toggle("active", btn.dataset.theme === choice);
+      });
+    }
+
+    function savedTheme() {
+      return localStorage.getItem("memask-theme") || "dark";
+    }
+
+    function setTheme(choice) {
+      localStorage.setItem("memask-theme", choice);
+      applyTheme(choice);
+    }
 
     /* ── daemon api ─────────────────────────────────── */
 
@@ -433,18 +703,14 @@
         t.classList.toggle("active", t.dataset.view === view);
       });
 
-      const inputView = document.getElementById("input-view");
-      const todoView = document.getElementById("todo-view");
+      document.getElementById("input-view").classList.toggle("hidden", view !== "input");
+      document.getElementById("todo-view").classList.toggle("active", view === "todos");
+      document.getElementById("recent-view").classList.toggle("active", view === "recent");
+      document.getElementById("settings-view").classList.toggle("active", view === "settings");
 
-      if (view === "input") {
-        inputView.classList.remove("hidden");
-        todoView.classList.remove("active");
-        focusInput();
-      } else {
-        inputView.classList.add("hidden");
-        todoView.classList.add("active");
-        loadTodos();
-      }
+      if (view === "input") focusInput();
+      if (view === "todos") loadTodos();
+      if (view === "recent") loadRecent();
     }
 
     /* ── todo view ──────────────────────────────────── */
@@ -500,6 +766,46 @@
       }
     }
 
+    /* ── recent view ─────────────────────────────────── */
+
+    async function loadRecent() {
+      const list = document.getElementById("recent-list");
+      const count = document.getElementById("recent-count");
+
+      list.innerHTML = '<div class="recent-empty">Loading…</div>';
+      count.textContent = "";
+
+      try {
+        const data = await fetchItems(null, null);
+        const items = data.items || [];
+        count.textContent = items.length === 1 ? "1 item" : `${items.length} items`;
+        renderRecentList(items);
+      } catch (err) {
+        count.textContent = "";
+        list.innerHTML = `<div class="recent-empty" style="color:var(--error)">Cannot load items: ${esc(err.message)}</div>`;
+      }
+    }
+
+    function renderRecentList(items) {
+      const list = document.getElementById("recent-list");
+
+      if (items.length === 0) {
+        list.innerHTML = '<div class="recent-empty">No items yet.</div>';
+        return;
+      }
+
+      list.innerHTML = items.map(item => {
+        const typeClass = (item.type === "note" || item.type === "todo") ? item.type : "other";
+        const meta = [item.type];
+        if (item.status) meta.push(item.status);
+        if (item.created_at) meta.push(item.created_at.slice(0, 16).replace("T", " "));
+        return `<div class="recent-row">
+          <div class="recent-content"><span class="recent-type ${typeClass}">${esc(item.type)}</span>${esc(item.content)}</div>
+          <div class="recent-meta">${esc(meta.join(" · "))}</div>
+        </div>`;
+      }).join("");
+    }
+
     /* ── response renderers ─────────────────────────── */
 
     function renderCaptured(data) {
@@ -544,9 +850,15 @@
 
     function renderAnswered(data) {
       let html = `<div class="msg msg-answer">${esc(data.answer)}</div>`;
-      const sources = data.sources || [];
-      if (sources.length > 0) {
-        html += `<div class="sources">Sources: ${sources.map(s => `<span>${esc(s)}</span>`).join(", ")}</div>`;
+      const results = data.results || [];
+      if (results.length > 0) {
+        html += `<div class="sources">Sources:</div>`;
+        html += results.map((r, i) =>
+          `<div class="result-item">
+            <div class="result-content"><span class="source-num">[${i + 1}]</span> ${esc(r.content)}</div>
+            <div class="result-meta">${esc(r.type || "note")} · score ${(r.score || 0).toFixed(2)}</div>
+          </div>`
+        ).join("");
       }
       return html;
     }
@@ -567,6 +879,72 @@
       return `<div class="msg hint">Command: ${esc(data.command || "unknown")}</div>`;
     }
 
+    function renderListed(data) {
+      const items = data.items || [];
+      if (items.length === 0) return `<div class="msg hint">No items found.</div>`;
+      const lis = items.map(item => {
+        const meta = [item.type];
+        if (item.status) meta.push(item.status);
+        return `<div class="result-item">
+          <div class="result-content">${esc(item.content)}</div>
+          <div class="result-meta">${esc(meta.join(" · "))}</div>
+        </div>`;
+      }).join("");
+      return `<ul class="result-list">${lis}</ul>`;
+    }
+
+    function renderServerError(data) {
+      return `<div class="msg msg-error">
+        <span>✗</span>
+        <span>${esc(data.message || "Unknown error")}</span>
+      </div>`;
+    }
+
+    function renderHelp(data) {
+      const cmds = data.commands || [];
+      const rows = cmds.map(c =>
+        `<div style="display:flex;gap:12px;padding:4px 0;border-bottom:1px solid var(--border-light)">
+          <span style="min-width:160px;font-family:'SF Mono','Fira Code','Consolas',monospace;font-size:12px;color:var(--accent)">${esc(c.command)}</span>
+          <span style="color:var(--text)">${esc(c.description)}</span>
+        </div>`
+      ).join("");
+      return `<div>${rows}</div>`;
+    }
+
+    function renderStatus(data) {
+      const lines = [
+        `LLM: ${data.llm ? "ready" : "not available"}`,
+        `Embedder: ${data.embedder || "none"}`,
+        `Items: ${data.items || 0}`,
+        `Vectors: ${data.vectors || 0}`,
+      ];
+      const jobs = data.jobs || {};
+      const jobEntries = Object.entries(jobs);
+      if (jobEntries.length > 0) {
+        lines.push(`Jobs: ${jobEntries.map(([k,v]) => k + "=" + v).join(", ")}`);
+      }
+      return `<div class="msg">${lines.map(l => `<div style="padding:2px 0;color:var(--text)">${esc(l)}</div>`).join("")}</div>`;
+    }
+
+    function renderTodoAmbiguous(data) {
+      const matches = data.matches || [];
+      let html = `<div class="msg" style="color:var(--warn)">${esc(data.message || "Multiple matches:")}</div>`;
+      html += matches.map(m =>
+        `<div class="result-item">
+          <div class="result-content">${esc(m.content)}</div>
+          <div class="result-meta">Use more specific text to match one</div>
+        </div>`
+      ).join("");
+      return html;
+    }
+
+    function renderTodoReopened(data) {
+      return `<div class="msg msg-success">
+        <span class="check">↩</span>
+        <span>Reopened: ${esc(data.content || "")}</span>
+      </div>`;
+    }
+
     function renderError(message) {
       return `<div class="msg msg-error">
         <span>✗</span>
@@ -580,9 +958,15 @@
       todo_completed: renderTodoCompleted,
       todo_not_found: renderTodoNotFound,
       todo_listed: renderTodoListed,
+      todo_ambiguous: renderTodoAmbiguous,
+      todo_reopened: renderTodoReopened,
       answered: renderAnswered,
       searched: renderSearched,
+      listed: renderListed,
+      help: renderHelp,
+      status: renderStatus,
       app_command: renderAppCommand,
+      error: renderServerError,
     };
 
     function renderResponse(result) {
@@ -732,6 +1116,8 @@
     /* ── init ────────────────────────────────────────── */
 
     document.addEventListener("DOMContentLoaded", () => {
+      applyTheme(savedTheme());
+
       document.getElementById("input").addEventListener("keydown", handleKeydown);
 
       document.querySelectorAll(".tab").forEach(tab => {
@@ -744,15 +1130,35 @@
       });
 
       document.getElementById("todo-refresh").addEventListener("click", loadTodos);
+      document.getElementById("recent-refresh").addEventListener("click", loadRecent);
+
+      document.getElementById("theme-switcher").addEventListener("click", (e) => {
+        const btn = e.target.closest(".theme-btn");
+        if (btn) setTheme(btn.dataset.theme);
+      });
+
+      window.matchMedia("(prefers-color-scheme: light)").addEventListener("change", () => {
+        if (savedTheme() === "auto") applyTheme("auto");
+      });
 
       document.addEventListener("keydown", (e) => {
         if (e.key === "Escape") { e.preventDefault(); hideWindow(); }
+
+        if (e.metaKey || e.ctrlKey) {
+          const tabMap = { "1": "input", "2": "todos", "3": "recent", "4": "settings" };
+          const view = tabMap[e.key];
+          if (view) {
+            e.preventDefault();
+            switchView(view);
+          }
+        }
       });
 
       document.addEventListener("visibilitychange", () => {
         if (!document.hidden) {
           if (activeView === "input") focusInput();
           if (activeView === "todos") loadTodos();
+          if (activeView === "recent") loadRecent();
         }
       });
 

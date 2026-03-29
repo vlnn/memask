@@ -130,6 +130,9 @@ def _serialize_results(results):
 
 def _handle_todo_create(svc, text, routing):
     content = _extract_todo_content(text)
+    if not content:
+        return _handle_todo_list(svc, text, routing)
+
     item = create_item(svc.conn, content, type="todo", status="pending")
     return DispatchResult(
         action="todo_created",
@@ -153,26 +156,220 @@ def _handle_todo_list(svc, text, routing):
 
 def _handle_todo_complete(svc, text, routing):
     search_text = _extract_complete_query(text)
-    todos = list_items(svc.conn, type="todo", status="pending")
+    if not search_text:
+        return DispatchResult(
+            action="todo_not_found",
+            data={"message": "Specify which todo to complete."},
+        )
 
-    match = _find_todo(search_text, todos)
-    if match is None:
+    todos = list_items(svc.conn, type="todo", status="pending")
+    matches = _find_todos(search_text, todos)
+
+    if len(matches) == 0:
         return DispatchResult(action="todo_not_found")
 
-    updated = update_item(svc.conn, match.id, status="done")
+    if len(matches) == 1:
+        updated = update_item(svc.conn, matches[0].id, status="done")
+        return DispatchResult(
+            action="todo_completed",
+            data={"id": updated.id, "content": updated.content},
+            item=updated,
+        )
+
     return DispatchResult(
-        action="todo_completed",
-        data={"id": updated.id, "content": updated.content},
-        item=updated,
+        action="todo_ambiguous",
+        data={
+            "message": f"Multiple todos match '{search_text}':",
+            "matches": [
+                {"id": t.id, "content": t.content} for t in matches
+            ],
+        },
+        items=list(matches),
     )
 
 
 def _handle_app_command(svc, text, routing):
     command = _extract_command_name(text)
+
+    command_handlers = {
+        "list": lambda: _handle_list(svc, text),
+        "notes": lambda: _handle_list_shortcut(svc, "note"),
+        "todos": lambda: _handle_list_shortcut(svc, "todo"),
+        "done": lambda: _handle_done_bare(svc),
+        "undone": lambda: _handle_undone(svc, text),
+        "help": lambda: _handle_help(),
+        "status": lambda: _handle_status(svc),
+    }
+
+    handler = command_handlers.get(command)
+    if handler:
+        return handler()
+
     return DispatchResult(
         action="app_command",
         data={"command": command},
     )
+
+
+def _handle_list(svc, text):
+    type_filter = _extract_list_type(text)
+    all_items = list_items(svc.conn, type=type_filter, limit=50)
+    return DispatchResult(
+        action="listed",
+        data={
+            "items": [
+                {
+                    "id": i.id,
+                    "content": i.content,
+                    "type": i.type,
+                    "status": i.status,
+                    "created_at": i.created_at,
+                }
+                for i in all_items
+            ],
+        },
+        items=list(all_items),
+    )
+
+
+def _handle_list_shortcut(svc, type_filter):
+    all_items = list_items(svc.conn, type=type_filter, limit=50)
+    return DispatchResult(
+        action="listed",
+        data={
+            "items": [
+                {
+                    "id": i.id,
+                    "content": i.content,
+                    "type": i.type,
+                    "status": i.status,
+                    "created_at": i.created_at,
+                }
+                for i in all_items
+            ],
+        },
+        items=list(all_items),
+    )
+
+
+def _handle_done_bare(svc):
+    todos = list_items(svc.conn, type="todo", status="done", limit=50)
+    return DispatchResult(
+        action="listed",
+        data={
+            "items": [
+                {
+                    "id": i.id,
+                    "content": i.content,
+                    "type": i.type,
+                    "status": i.status,
+                    "created_at": i.created_at,
+                }
+                for i in todos
+            ],
+        },
+        items=list(todos),
+    )
+
+
+def _handle_undone(svc, text):
+    search_text = _extract_undone_query(text)
+    if not search_text:
+        return DispatchResult(
+            action="todo_not_found",
+            data={"message": "Specify which todo to reopen."},
+        )
+
+    done_todos = list_items(svc.conn, type="todo", status="done", limit=100)
+    matches = _find_todos(search_text, done_todos)
+
+    if len(matches) == 0:
+        return DispatchResult(
+            action="todo_not_found",
+            data={"message": "No completed todo matches."},
+        )
+
+    if len(matches) == 1:
+        updated = update_item(svc.conn, matches[0].id, status="pending")
+        return DispatchResult(
+            action="todo_reopened",
+            data={"id": updated.id, "content": updated.content},
+            item=updated,
+        )
+
+    return DispatchResult(
+        action="todo_ambiguous",
+        data={
+            "message": f"Multiple completed todos match '{search_text}':",
+            "matches": [
+                {"id": t.id, "content": t.content} for t in matches
+            ],
+        },
+        items=list(matches),
+    )
+
+
+def _handle_help():
+    commands = [
+        ("(any text)", "Capture a note"),
+        ("remind me to ...", "Create a todo"),
+        ("?query", "Search / ask a question"),
+        ("/todo add ...", "Create a todo"),
+        ("/todo list", "List pending todos"),
+        ("/todo done ...", "Complete a todo"),
+        ("/done ...", "Complete a todo (shortcut)"),
+        ("/undone ...", "Reopen a completed todo"),
+        ("/list", "List all recent items"),
+        ("/notes", "List recent notes"),
+        ("/todos", "List pending todos"),
+        ("/done", "List completed todos"),
+        ("!help", "Show this help"),
+        ("!status", "Show daemon status"),
+    ]
+    return DispatchResult(
+        action="help",
+        data={
+            "commands": [
+                {"command": cmd, "description": desc}
+                for cmd, desc in commands
+            ],
+        },
+    )
+
+
+def _handle_status(svc):
+    from memask.repository.jobs import queue_status
+
+    llm_available = svc.llm is not None and svc.llm.is_available()
+    embedder_model = svc.embedder.model_name if svc.embedder else None
+    index_count = svc.store.count() if svc.store else 0
+    jobs = queue_status(svc.conn)
+    item_count = len(list_items(svc.conn, limit=10000))
+
+    return DispatchResult(
+        action="status",
+        data={
+            "llm": llm_available,
+            "embedder": embedder_model,
+            "vectors": index_count,
+            "items": item_count,
+            "jobs": jobs,
+        },
+    )
+
+
+def _extract_list_type(text: str) -> str | None:
+    m = re.match(r"^/list\s+(\w+)", text.strip(), re.I)
+    if not m:
+        return None
+    word = m.group(1).lower()
+    type_map = {
+        "notes": "note",
+        "note": "note",
+        "todos": "todo",
+        "todo": "todo",
+    }
+    return type_map.get(word)
 
 
 def _extract_todo_content(text: str) -> str:
@@ -197,22 +394,33 @@ def _extract_todo_content(text: str) -> str:
         if match:
             return match.group(1).strip()
 
-    return stripped
+    return ""
 
 
 def _extract_complete_query(text: str) -> str:
-    match = re.match(r"^/todo\s+(?:done|complete)\s+(.+)$", text.strip(), re.I)
-    if match:
-        return match.group(1).strip()
-    return text.strip()
+    for pattern in [
+        re.compile(r"^/todo\s+(?:done|complete)\s+(.+)$", re.I),
+        re.compile(r"^/done\s+(.+)$", re.I),
+    ]:
+        match = pattern.match(text.strip())
+        if match:
+            return match.group(1).strip()
+    return ""
+
+
+def _extract_undone_query(text: str) -> str:
+    m = re.match(r"^/undone\s+(.+)$", text.strip(), re.I)
+    return m.group(1).strip() if m else ""
+
+
+def _find_todos(query: str, todos: list[Item]) -> list[Item]:
+    query_lower = query.lower()
+    return [t for t in todos if query_lower in t.content.lower()]
 
 
 def _find_todo(query: str, todos: list[Item]) -> Item | None:
-    query_lower = query.lower()
-    for todo in todos:
-        if query_lower in todo.content.lower():
-            return todo
-    return None
+    matches = _find_todos(query, todos)
+    return matches[0] if len(matches) == 1 else None
 
 
 def _extract_command_name(text: str) -> str:

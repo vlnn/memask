@@ -128,8 +128,25 @@ class TestDispatchTodoActions:
         result = dispatch(svc, "/todo done nonexistent task")
         assert result.action == "todo_not_found", "should report not found"
 
-    def test_app_command(self, conn):
+    def test_generic_app_command(self, conn):
+        svc = ServiceContext(conn=conn)
+        result = dispatch(svc, "!export")
+        assert result.action == "app_command", (
+            "should route unknown bang command to app_command"
+        )
+        assert result.data.get("command") == "export", "should extract command name"
+
+    def test_help_command(self, conn):
         svc = ServiceContext(conn=conn)
         result = dispatch(svc, "!help")
-        assert result.action == "app_command", "should route to app command"
-        assert result.data.get("command") == "help", "should extract command name"
+        assert result.action == "help", "!help should return help action"
+        assert "commands" in result.data, "help should include commands list"
+        assert len(result.data["commands"]) > 0, (
+            "help should list available commands"
+        )
+
+    def test_status_command(self, conn):
+        svc = ServiceContext(conn=conn)
+        result = dispatch(svc, "!status")
+        assert result.action == "status", "!status should return status action"
+        assert "items" in result.data, "status should include item count"

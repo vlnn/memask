@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import logging
 from typing import TYPE_CHECKING
 
 from flask import Flask, jsonify, request
 
 if TYPE_CHECKING:
     from memask.app import AppContext
+
+logger = logging.getLogger(__name__)
 
 
 def create_app(app_context: AppContext) -> Flask:
@@ -18,6 +21,14 @@ def create_app(app_context: AppContext) -> Flask:
         response.headers["Access-Control-Allow-Headers"] = "Content-Type"
         response.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
         return response
+
+    @app.errorhandler(Exception)
+    def handle_exception(exc):
+        logger.exception("unhandled error: %s", exc)
+        return jsonify({
+            "action": "error",
+            "data": {"message": str(exc)},
+        }), 500
 
     app.add_url_rule("/health", view_func=_health, methods=["GET"])
     app.add_url_rule("/input", view_func=_input, methods=["POST"])
