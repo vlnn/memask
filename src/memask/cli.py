@@ -17,26 +17,51 @@ def _get_svc(ctx: click.Context) -> ServiceContext:
     return _get_app(ctx).service_context()
 
 
+def _get_daemon_client(ctx: click.Context):
+    url = ctx.obj.get("daemon_url")
+    if url is None:
+        return None
+    from memask.client import DaemonClient
+    return DaemonClient(url)
+
+
 @click.group()
 @click.option(
     "--db",
     default=None,
     help="Database path (default: ~/.memask/memask.db)",
 )
+@click.option(
+    "--url",
+    default=None,
+    help="Daemon URL (e.g. http://127.0.0.1:7394)",
+)
 @click.pass_context
-def cli(ctx: click.Context, db: str | None) -> None:
+def cli(ctx: click.Context, db: str | None, url: str | None) -> None:
     ctx.ensure_object(dict)
-    app = AppContext(db_path=db)
-    ctx.obj["app"] = app
-    ctx.call_on_close(app.shutdown)
+    ctx.obj["daemon_url"] = url
+    if url is None:
+        app = AppContext(db_path=db)
+        ctx.obj["app"] = app
+        ctx.call_on_close(app.shutdown)
 
 
 @cli.command()
 @click.argument("text", nargs=-1, required=True)
 @click.pass_context
 def input(ctx: click.Context, text: tuple[str, ...]) -> None:
-    svc = _get_svc(ctx)
     full_text = " ".join(text)
+
+    client = _get_daemon_client(ctx)
+    if client is not None:
+        try:
+            data = client.input(full_text)
+            _format_daemon_result(data)
+            return
+        except ConnectionError as exc:
+            raise click.ClickException(f"daemon not reachable: {exc}")
+
+    svc = _get_svc(ctx)
     result = dispatch(svc, full_text)
 
     formatters = {
@@ -97,6 +122,23 @@ def list_cmd(
     category: str | None,
     limit: int,
 ) -> None:
+    client = _get_daemon_client(ctx)
+    if client is not None:
+        try:
+            data = client.items(type=item_type, status=status)
+            items_list = data.get("items", [])
+            if not items_list:
+                click.echo("No items found.")
+                return
+            for item in items_list:
+                prefix = f"[{item['type']}]"
+                if item.get("status"):
+                    prefix += f" ({item['status']})"
+                click.echo(f"{prefix} {item['id']}: {item['content']}")
+            return
+        except ConnectionError as exc:
+            raise click.ClickException(f"daemon not reachable: {exc}")
+
     svc = _get_svc(ctx)
     results = items.list_items(
         svc.conn,
@@ -132,6 +174,20 @@ def search(
     limit: int,
     keyword_only: bool,
 ) -> None:
+    client = _get_daemon_client(ctx)
+    if client is not None:
+        try:
+            data = client.search(query)
+            results = data.get("results", [])
+            if not results:
+                click.echo("No results found.")
+                return
+            for r in results:
+                click.echo(f"[{r.get('type', '?')}] {r['id']}: {r['content']}")
+            return
+        except ConnectionError as exc:
+            raise click.ClickException(f"daemon not reachable: {exc}")
+
     svc = _get_svc(ctx)
 
     if keyword_only or svc.store is None or svc.embedder is None:
@@ -194,6 +250,17 @@ def reindex(ctx: click.Context) -> None:
 
     processed = process_all_pending(svc.conn, svc.store, svc.embedder)
     click.echo(f"Processed {processed} jobs")
+
+
+@cli.command("serve")
+@click.option("--host", default="127.0.0.1", help="Bind address")
+@click.option("--port", default=7394, type=int, help="Port number")
+@click.pass_context
+def serve_cmd(ctx, host, port):
+    """Start the memask daemon."""
+    from memask.daemon import run_daemon
+    db = ctx.parent.params.get("db") if ctx.parent else None
+    run_daemon(db_path=db, host=host, port=port)
 
 
 @cli.group()
@@ -303,3 +370,43 @@ def _format_app_command(result):
 
 def _format_default(result):
     click.echo(f"[{result.action}] OK")
+
+
+def _format_daemon_result(data):
+    action = data.get("action", "unknown")
+    inner = data.get("data", {})
+
+    if action == "captured":
+        click.echo(f"Saved: {inner.get('content', '')}")
+    elif action == "searched":
+        results = inner.get("results", [])
+        if not results:
+            click.echo("No results found.")
+            return
+        for r in results:
+            tag = r.get("type", "?")
+            src = r.get("source", "?")
+            score = r.get("score", 0)
+            click.echo(f"  [{tag}] [{src} {score:.3f}] {r['id']}: {r['content']}")
+    elif action == "answered":
+        click.echo(inner.get("answer", ""))
+        sources = inner.get("sources", [])
+        if sources:
+            click.echo(f"\nSources: {', '.join(sources)}")
+    elif action == "todo_created":
+        click.echo(f"Todo: {inner.get('content', '')}")
+    elif action == "todo_listed":
+        items_data = inner.get("items", [])
+        if not items_data:
+            click.echo("No pending todos.")
+            return
+        for item in items_data:
+            click.echo(f"  [{item.get('status', '?')}] {item['id']}: {item['content']}")
+    elif action == "todo_completed":
+        click.echo(f"Done: {inner.get('content', '')}")
+    elif action == "todo_not_found":
+        click.echo("Todo not found.")
+    elif action == "app_command":
+        click.echo(f"Command: {inner.get('command', '?')}")
+    else:
+        click.echo(f"[{action}] {inner}")

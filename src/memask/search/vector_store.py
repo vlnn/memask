@@ -24,27 +24,33 @@ class VectorStore:
         return self._db
 
     def _get_table(self):
-        if self._table is None:
-            db = self._get_db()
-            schema = pa.schema(
-                [
-                    pa.field("item_id", pa.string()),
-                    pa.field("chunk_index", pa.int32()),
-                    pa.field("text", pa.string()),
-                    pa.field("model_version", pa.string()),
-                    pa.field(
-                        "vector",
-                        pa.list_(pa.float32(), self._dimension),
-                    ),
-                ]
-            )
-            if TABLE_NAME in db.list_tables():
-                self._table = db.open_table(TABLE_NAME)
-            else:
-                self._table = db.create_table(
-                    TABLE_NAME,
-                    schema=schema,
-                )
+        if self._table is not None:
+            return self._table
+
+        db = self._get_db()
+
+        try:
+            self._table = db.open_table(TABLE_NAME)
+            return self._table
+        except Exception:
+            pass
+
+        schema = pa.schema(
+            [
+                pa.field("item_id", pa.string()),
+                pa.field("chunk_index", pa.int32()),
+                pa.field("text", pa.string()),
+                pa.field("model_version", pa.string()),
+                pa.field(
+                    "vector",
+                    pa.list_(pa.float32(), self._dimension),
+                ),
+            ]
+        )
+        self._table = db.create_table(
+            TABLE_NAME,
+            schema=schema,
+        )
         return self._table
 
     def add(
