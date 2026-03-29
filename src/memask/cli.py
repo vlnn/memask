@@ -42,6 +42,7 @@ def input(ctx: click.Context, text: tuple[str, ...]) -> None:
     formatters = {
         "captured": _format_captured,
         "searched": _format_searched,
+        "answered": _format_answered,
         "todo_created": _format_todo_created,
         "todo_listed": _format_todo_listed,
         "todo_completed": _format_todo_completed,
@@ -195,6 +196,63 @@ def reindex(ctx: click.Context) -> None:
     click.echo(f"Processed {processed} jobs")
 
 
+@cli.group()
+def model():
+    """Manage LLM model files."""
+
+
+@model.command("status")
+def model_status_cmd():
+    """Show current model status."""
+    from memask.rag.models import model_status as get_status
+
+    status = get_status()
+    click.echo(f"Model:  {status['model_name']}")
+    click.echo(f"Path:   {status['path']}")
+    if status["downloaded"]:
+        click.echo(f"Size:   {status['size_mb']} MB")
+        click.echo("Status: ready")
+    else:
+        click.echo("Status: not downloaded")
+        click.echo("Run 'memask model download' to fetch from:")
+        click.echo(f"  {status['url']}")
+
+
+@model.command("download")
+def model_download_cmd():
+    """Download the default LLM model."""
+    from memask.rag.models import download_model, model_status as get_status
+
+    status = get_status()
+    if status["downloaded"]:
+        click.echo(f"Model already downloaded at {status['path']}")
+        click.echo(f"Size: {status['size_mb']} MB")
+        return
+
+    click.echo(f"Downloading {status['model_name']}...")
+    click.echo(f"From: {status['url']}")
+
+    def progress(pct, downloaded, total):
+        mb_done = downloaded / (1024 * 1024)
+        mb_total = total / (1024 * 1024)
+        click.echo(f"\r  {pct:.0f}% ({mb_done:.0f}/{mb_total:.0f} MB)", nl=False)
+
+    try:
+        path = download_model(progress_callback=progress)
+        click.echo(f"\nSaved to {path}")
+    except Exception as e:
+        click.echo(f"\nDownload failed: {e}", err=True)
+        raise SystemExit(1)
+
+
+@model.command("path")
+def model_path_cmd():
+    """Print the model file path (for scripting)."""
+    from memask.rag.models import model_path
+
+    click.echo(str(model_path()))
+
+
 def _format_captured(result):
     click.echo(f"Saved: {result.data.get('content', '')}")
 
@@ -209,6 +267,13 @@ def _format_searched(result):
         src = r.get("source", "?")
         score = r.get("score", 0)
         click.echo(f"  [{tag}] [{src} {score:.3f}] {r['id']}: {r['content']}")
+
+
+def _format_answered(result):
+    click.echo(result.data.get("answer", ""))
+    sources = result.data.get("sources", [])
+    if sources:
+        click.echo(f"\nSources: {', '.join(sources)}")
 
 
 def _format_todo_created(result):
