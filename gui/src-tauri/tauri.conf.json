@@ -8,14 +8,21 @@
   },
   "app": {
     "withGlobalTauri": true,
+    "security": {
+      "csp": "default-src 'self' 'unsafe-inline'; connect-src 'self' http://127.0.0.1:7394"
+    },
     "windows": [
       {
         "label": "main",
         "title": "Memory",
         "width": 600,
-        "height": 400,
+        "height": 460,
         "visible": false,
-        "center": true
+        "center": true,
+        "decorations": false,
+        "alwaysOnTop": true,
+        "skipTaskbar": true,
+        "resizable": false
       }
     ]
   },

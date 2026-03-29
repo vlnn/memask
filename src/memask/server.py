@@ -12,6 +12,13 @@ def create_app(app_context: AppContext) -> Flask:
     app = Flask(__name__)
     app.config["app_context"] = app_context
 
+    @app.after_request
+    def cors_headers(response):
+        response.headers["Access-Control-Allow-Origin"] = "*"
+        response.headers["Access-Control-Allow-Headers"] = "Content-Type"
+        response.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
+        return response
+
     app.add_url_rule("/health", view_func=_health, methods=["GET"])
     app.add_url_rule("/input", view_func=_input, methods=["POST"])
     app.add_url_rule("/items", view_func=_items, methods=["GET"])
