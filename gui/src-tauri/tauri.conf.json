@@ -4,7 +4,7 @@
   "version": "0.1.0",
   "identifier": "com.memory-app.dev",
   "build": {
-    "frontendDist": "../src"
+    "frontendDist": ".."
   },
   "app": {
     "withGlobalTauri": true,
