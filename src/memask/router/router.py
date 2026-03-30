@@ -10,7 +10,7 @@ logger = logging.getLogger(__name__)
 
 @dataclass(frozen=True)
 class RouterConfig:
-    embedding_threshold: Confidence = Confidence.LOW
+    embedding_threshold: Confidence = Confidence.MEDIUM
     enable_embedding: bool = True
 
 
