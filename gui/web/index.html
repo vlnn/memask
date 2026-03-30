@@ -257,6 +257,62 @@
 
     #response:empty { display: none; }
 
+    /* ── input recent entries ──────────────────────────── */
+
+    #input-recent {
+      flex: 1;
+      overflow-y: auto;
+      padding: 0;
+      scrollbar-width: thin;
+      scrollbar-color: var(--scroll-thumb) transparent;
+    }
+
+    #input-recent.hidden { display: none; }
+
+    .input-recent-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 7px 16px;
+      border-bottom: 1px solid var(--border-light);
+      font-size: 13px;
+      color: var(--text);
+      cursor: pointer;
+      transition: background 0.1s;
+    }
+
+    .input-recent-row:hover { background: var(--hover-bg); }
+    .input-recent-row:last-child { border-bottom: none; }
+
+    .input-recent-type {
+      flex-shrink: 0;
+      display: inline-block;
+      padding: 1px 5px;
+      border-radius: 3px;
+      font-size: 10px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    .input-recent-type.note { background: var(--tag-note-bg); color: var(--tag-note-fg); }
+    .input-recent-type.todo { background: var(--tag-todo-bg); color: var(--tag-todo-fg); }
+    .input-recent-type.other { background: var(--tag-other-bg); color: var(--tag-other-fg); }
+
+    .input-recent-text {
+      flex: 1;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      color: var(--text-strong);
+    }
+
+    .input-recent-time {
+      flex-shrink: 0;
+      font-size: 11px;
+      color: var(--text-faint);
+    }
+
     /* ── todo view ──────────────────────────────────── */
 
     #todo-view { display: none; flex-direction: column; flex: 1; min-height: 0; }
@@ -663,6 +719,7 @@
         <div id="suggest-dropdown"></div>
       </div>
       <div id="response"></div>
+      <div id="input-recent"></div>
     </div>
 
     <div id="todo-view">
@@ -765,10 +822,11 @@
       return resp.json();
     }
 
-    async function fetchItems(type, status) {
+    async function fetchItems(type, status, limit) {
       const params = new URLSearchParams();
       if (type) params.set("type", type);
       if (status) params.set("status", status);
+      if (limit) params.set("limit", String(limit));
       const resp = await fetch(`${DAEMON}/items?${params}`);
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
       return resp.json();
@@ -797,7 +855,7 @@
       document.getElementById("recent-view").classList.toggle("active", view === "recent");
       document.getElementById("settings-view").classList.toggle("active", view === "settings");
 
-      if (view === "input") focusInput();
+      if (view === "input") { focusInput(); loadInputRecent(); }
       if (view === "todos") loadTodos();
       if (view === "recent") loadRecent();
     }
@@ -893,6 +951,44 @@
           <div class="recent-meta">${esc(meta.join(" · "))}</div>
         </div>`;
       }).join("");
+    }
+
+    /* ── input recent (default entries under input) ─── */
+
+    async function loadInputRecent() {
+      const el = document.getElementById("input-recent");
+      try {
+        const data = await fetchItems(null, null, 10);
+        renderInputRecent(data.items || []);
+      } catch {
+        el.innerHTML = "";
+      }
+      syncInputRecentVisibility();
+    }
+
+    function renderInputRecent(items) {
+      const el = document.getElementById("input-recent");
+
+      if (items.length === 0) {
+        el.innerHTML = '<div style="padding:32px 16px;text-align:center;color:var(--text-faint);font-size:14px">No items yet.</div>';
+        return;
+      }
+
+      el.innerHTML = items.map(item => {
+        const typeClass = (item.type === "note" || item.type === "todo") ? item.type : "other";
+        const ts = item.created_at ? item.created_at.slice(0, 16).replace("T", " ") : "";
+        return `<div class="input-recent-row" data-id="${esc(item.id)}" data-content="${esc(item.content)}" data-type="${esc(item.type)}">
+          <span class="input-recent-type ${typeClass}">${esc(item.type)}</span>
+          <span class="input-recent-text">${esc(item.content)}</span>
+          <span class="input-recent-time">${esc(ts)}</span>
+        </div>`;
+      }).join("");
+    }
+
+    function syncInputRecentVisibility() {
+      const response = document.getElementById("response");
+      const recent = document.getElementById("input-recent");
+      recent.classList.toggle("hidden", response.innerHTML.trim() !== "");
     }
 
     /* ── response renderers ─────────────────────────── */
@@ -1077,6 +1173,7 @@
 
     function setResponse(html) {
       document.getElementById("response").innerHTML = html;
+      syncInputRecentVisibility();
     }
 
     function clearResponse() { setResponse(""); }
@@ -1114,6 +1211,7 @@
         if (!_daemonSeen) {
           _daemonSeen = true;
           schedulePoll(15000);
+          loadInputRecent();
         }
 
         if (!llmOk) {
@@ -1339,6 +1437,7 @@
             await patchItem(itemId, { content: parsed.content });
             setResponse(`<div class="msg msg-success"><span class="check">✓</span><span>Updated.</span></div>`);
         }
+        loadInputRecent();
       } catch (err) {
         setResponse(renderError(err.message));
       } finally {
@@ -1375,6 +1474,7 @@
       try {
         const result = await postInput(text);
         setResponse(renderResponse(result));
+        loadInputRecent();
       } catch (err) {
         const isDaemonDown = err.message.includes("fetch") || err.message.includes("network");
         const msg = isDaemonDown
@@ -1486,6 +1586,14 @@
       document.getElementById("todo-refresh").addEventListener("click", loadTodos);
       document.getElementById("recent-refresh").addEventListener("click", loadRecent);
 
+      document.getElementById("input-recent").addEventListener("click", (e) => {
+        const row = e.target.closest(".input-recent-row");
+        if (!row) return;
+        const input = document.getElementById("input");
+        input.value = row.dataset.content;
+        enterEditMode(row.dataset.id, row.dataset.type);
+      });
+
       document.getElementById("theme-switcher").addEventListener("click", (e) => {
         const btn = e.target.closest(".theme-btn");
         if (btn) setTheme(btn.dataset.theme);
@@ -1510,12 +1618,13 @@
 
       document.addEventListener("visibilitychange", () => {
         if (!document.hidden) {
-          if (activeView === "input") focusInput();
+          if (activeView === "input") { focusInput(); loadInputRecent(); }
           if (activeView === "todos") loadTodos();
           if (activeView === "recent") loadRecent();
         }
       });
 
+      loadInputRecent();
       pollHealth();
       schedulePoll(3000);
     });

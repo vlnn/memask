@@ -84,14 +84,22 @@ def _input():
     return jsonify(result.to_dict())
 
 
+def _parse_limit(raw, default=100, ceiling=500):
+    try:
+        return min(int(raw), ceiling)
+    except (TypeError, ValueError):
+        return default
+
+
 def _items():
     from memask.repository.items import list_items
 
     svc = _get_svc()
     type_filter = request.args.get("type")
     status_filter = request.args.get("status")
+    limit = _parse_limit(request.args.get("limit"), default=100, ceiling=500)
 
-    items = list_items(svc.conn, type=type_filter, status=status_filter)
+    items = list_items(svc.conn, type=type_filter, status=status_filter, limit=limit)
     return jsonify({
         "items": [_serialize_item(item) for item in items],
     })

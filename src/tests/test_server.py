@@ -3,7 +3,7 @@ import json
 import pytest
 
 from memask.app import AppContext
-from memask.server import create_app
+from memask.server import create_app, _parse_limit
 from tests.helpers import FakeEmbeddingService, FakeLLM, FakeReranker
 
 
@@ -132,6 +132,35 @@ class TestItemsEndpoint:
         data = resp_json(resp)
         assert data["items"] == [], "empty db should return empty list"
 
+    def test_respects_limit(self, client):
+        for i in range(5):
+            client.post("/input", json={"text": f"note {i}"})
+        resp = client.get("/items?limit=3")
+        data = resp_json(resp)
+        assert len(data["items"]) == 3, "should respect limit parameter"
+
+    def test_limit_returns_newest_first(self, client):
+        client.post("/input", json={"text": "older note"})
+        client.post("/input", json={"text": "newer note"})
+        resp = client.get("/items?limit=1")
+        data = resp_json(resp)
+        assert len(data["items"]) == 1, "should return exactly one item"
+        assert data["items"][0]["content"] == "newer note", (
+            "limit=1 should return the newest item"
+        )
+
+    def test_invalid_limit_defaults_gracefully(self, client):
+        client.post("/input", json={"text": "a note"})
+        resp = client.get("/items?limit=abc")
+        assert resp.status_code == 200, "invalid limit should not crash"
+
+    def test_no_limit_returns_default(self, client):
+        for i in range(5):
+            client.post("/input", json={"text": f"note {i}"})
+        resp = client.get("/items")
+        data = resp_json(resp)
+        assert len(data["items"]) == 5, "no limit should return all (up to default)"
+
 
 class TestSearchEndpoint:
     def test_search_returns_results(self, client):
@@ -177,6 +206,22 @@ class TestJsonContentType:
         resp = client.post("/input", json={"text": "hello"})
         assert resp.content_type == "application/json", (
             "input should return application/json"
+        )
+
+
+class TestParseLimit:
+    @pytest.mark.parametrize("raw,default,ceiling,expected", [
+        ("10", 100, 500, 10),
+        ("999", 100, 500, 500),
+        ("abc", 100, 500, 100),
+        (None, 100, 500, 100),
+        ("0", 100, 500, 0),
+        ("-5", 100, 500, -5),
+        ("3", 50, 10, 3),
+    ])
+    def test_parses_limit(self, raw, default, ceiling, expected):
+        assert _parse_limit(raw, default=default, ceiling=ceiling) == expected, (
+            f"_parse_limit({raw!r}, default={default}, ceiling={ceiling}) should be {expected}"
         )
 
 

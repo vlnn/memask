@@ -1,6 +1,6 @@
 import re
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, UTC
 
 
 @dataclass(frozen=True)
@@ -31,7 +31,7 @@ UNIT_DAYS = {"d": 1, "w": 7, "m": 30, "y": 365}
 
 
 def resolve(expression: str, now: datetime | None = None) -> DateRange | None:
-    now = now or datetime.now()
+    now = now or datetime.now(UTC)
     expr = expression.strip().lower()
 
     m = OFFSET_RE.match(expr)

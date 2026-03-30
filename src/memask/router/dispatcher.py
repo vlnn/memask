@@ -1,3 +1,4 @@
+from datetime import UTC
 import re
 from dataclasses import dataclass, field
 from typing import Any
@@ -56,12 +57,15 @@ def _handle_capture(svc, text, routing):
         item=item,
     )
 
+def _to_utc_iso(dt):
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=UTC)
+    return dt.isoformat()
 
 def _date_filter(ctx):
     if ctx.date_range:
-        return ctx.date_range.start.isoformat(), ctx.date_range.end.isoformat()
+        return _to_utc_iso(ctx.date_range.start), _to_utc_iso(ctx.date_range.end)
     return None, None
-
 
 def _effective_query(svc, query):
     if needs_refinement(query) and svc.llm and svc.llm.is_available():
