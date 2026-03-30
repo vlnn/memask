@@ -3,7 +3,7 @@
 use tauri::{
     menu::{Menu, MenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
-    Manager,
+    Manager, WindowEvent,
 };
 use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
 
@@ -50,6 +50,11 @@ fn main() {
             app.global_shortcut().register(shortcut)?;
 
             Ok(())
+        })
+        .on_window_event(|window, event| {
+            if let WindowEvent::Focused(false) = event {
+                let _ = window.hide();
+            }
         })
         .run(tauri::generate_context!())
         .expect("failed to start memask");
