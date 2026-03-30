@@ -16,6 +16,12 @@ INTENT_EXEMPLARS: dict[Intent, list[str]] = {
         "decided to use postgres instead of mysql",
         "interesting article about distributed systems",
         "the API response time is 200ms",
+        "server is under heavy load after the deploy",
+        "had to restart the service due to a network stall",
+        "the database crashed and recovered on its own",
+        "switched to the backup node while primary was down",
+        "CI pipeline broke after the OS upgrade",
+        "redis memory usage spiked to 90% overnight",
     ],
     Intent.SEARCH: [
         "what did I note about deployment",
@@ -32,12 +38,6 @@ INTENT_EXEMPLARS: dict[Intent, list[str]] = {
         "remind about the dentist appointment",
         "have to review the pull request",
         "don't forget to email the client",
-        "buy groceries",
-        "call the dentist",
-        "pay the bills",
-        "pick up dry cleaning",
-        "book a flight",
-        "order new contact lenses",
     ],
     Intent.TODO_LIST: [
         "show my tasks",
@@ -55,6 +55,11 @@ INTENT_EXEMPLARS: dict[Intent, list[str]] = {
 
 SIMILARITY_THRESHOLD = 0.35
 _cached_vectors: dict[Intent, np.ndarray] | None = None
+
+
+def reset_cache():
+    global _cached_vectors
+    _cached_vectors = None
 
 
 def classify_by_embedding(text: str, embedding_service) -> RoutingResult | None:
