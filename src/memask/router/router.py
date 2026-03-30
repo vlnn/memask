@@ -10,7 +10,6 @@ logger = logging.getLogger(__name__)
 
 @dataclass(frozen=True)
 class RouterConfig:
-    embedding_threshold: Confidence = Confidence.MEDIUM
     enable_embedding: bool = True
 
 
@@ -25,12 +24,11 @@ def route(
     cfg = config or _DEFAULT_CONFIG
     rules_result = classify_by_rules(text)
 
-    if rules_result.confidence != cfg.embedding_threshold:
+    if rules_result.confidence == Confidence.HIGH:
         logger.debug(
-            "rules classified '%s' as %s (%s)",
+            "rules classified '%s' as %s (high confidence)",
             text[:50],
             rules_result.intent.value,
-            rules_result.confidence.value,
         )
         return rules_result
 

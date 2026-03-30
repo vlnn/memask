@@ -129,10 +129,7 @@ def _serialize_results(results):
 
 
 def _handle_todo_create(svc, text, routing):
-    content = _extract_todo_content(text)
-    if not content:
-        return _handle_todo_list(svc, text, routing)
-
+    content = _extract_todo_content(text) or text.strip()
     item = create_item(svc.conn, content, type="todo", status="pending")
     return DispatchResult(
         action="todo_created",

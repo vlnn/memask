@@ -1,6 +1,10 @@
+import pytest
+
 from memask.context import ServiceContext
 from memask.repository.items import create_item
-from memask.router.dispatcher import DispatchResult, dispatch
+from memask.router.dispatcher import DispatchResult, dispatch, _handle_todo_create
+from memask.router.intents import Confidence, Intent, RoutingResult
+from memask.router.query_understanding import extract_query_context
 from memask.search.vector_store import VectorStore
 from memask.search.worker import enqueue_embedding, process_all_pending
 from tests.helpers import FakeEmbeddingService
@@ -150,3 +154,61 @@ class TestDispatchTodoActions:
         result = dispatch(svc, "!status")
         assert result.action == "status", "!status should return status action"
         assert "items" in result.data, "status should include item count"
+
+
+class TestTodoCreateWithoutPrefix:
+    def _make_routing(self, text):
+        return RoutingResult(
+            intent=Intent.TODO_CREATE,
+            confidence=Confidence.MEDIUM,
+            query_context=extract_query_context(text),
+            raw_input=text,
+            source="embedding",
+        )
+
+    @pytest.mark.parametrize("text,expected_content", [
+        ("buy a book", "buy a book"),
+        ("buy milk", "buy milk"),
+        ("call mom", "call mom"),
+        ("fix the leaky faucet", "fix the leaky faucet"),
+    ])
+    def test_bare_text_creates_todo_with_full_text(self, conn, text, expected_content):
+        svc = ServiceContext(conn=conn)
+        routing = self._make_routing(text)
+        result = _handle_todo_create(svc, text, routing)
+        assert result.action == "todo_created", (
+            f"'{text}' routed to TODO_CREATE should create a todo, not list"
+        )
+        assert result.data["content"] == expected_content, (
+            f"should use raw text '{text}' as content when no prefix to strip"
+        )
+
+    def test_prefixed_text_still_strips(self, conn):
+        svc = ServiceContext(conn=conn)
+        routing = self._make_routing("remind me to buy a book")
+        result = _handle_todo_create(svc, "remind me to buy a book", routing)
+        assert result.action == "todo_created", (
+            "prefixed text should still create todo"
+        )
+        assert result.data["content"] == "buy a book", (
+            "should strip 'remind me to' prefix"
+        )
+
+    def test_todo_prefix_still_strips(self, conn):
+        svc = ServiceContext(conn=conn)
+        routing = self._make_routing("/todo buy a book")
+        result = _handle_todo_create(svc, "/todo buy a book", routing)
+        assert result.action == "todo_created", (
+            "/todo prefixed text should still create todo"
+        )
+        assert result.data["content"] == "buy a book", (
+            "should strip '/todo' prefix"
+        )
+
+    def test_created_item_is_todo_type(self, conn):
+        svc = ServiceContext(conn=conn)
+        routing = self._make_routing("buy a book")
+        result = _handle_todo_create(svc, "buy a book", routing)
+        assert result.item is not None, "should return the created item"
+        assert result.item.type == "todo", "created item should be type todo"
+        assert result.item.status == "pending", "created item should be pending"

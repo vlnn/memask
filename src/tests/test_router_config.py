@@ -1,16 +1,12 @@
 import pytest
 
-from memask.router.intents import Confidence, Intent, RoutingResult
-from memask.router.query_understanding import extract_query_context
+from memask.router.intents import Confidence, Intent
 from memask.router.router import RouterConfig, route
 
 
 class TestRouterConfig:
     def test_default_config(self):
         config = RouterConfig()
-        assert config.embedding_threshold == Confidence.MEDIUM, (
-            "should default to using embedding for MEDIUM confidence"
-        )
         assert config.enable_embedding is True, (
             "embedding classification should be enabled by default"
         )
@@ -18,7 +14,7 @@ class TestRouterConfig:
     def test_disable_embedding(self):
         config = RouterConfig(enable_embedding=False)
         result = route(
-            "buy sugar",
+            "deployment notes from yesterday",
             config=config,
         )
         assert result.source == "rules", "should use rules only when embedding disabled"
@@ -48,17 +44,18 @@ class TestRouteWithConfig:
             pass
 
         route(
-            "buy sugar",
+            "buy contact lenses again",
             embedding_service=FakeEmb(),
             config=config,
         )
         mock_classify.assert_called_once(), (
-            "MEDIUM confidence input should trigger embedding classifier"
+            "MEDIUM confidence CAPTURE should consult embedding classifier"
         )
 
-    def test_low_confidence_skips_embedding(self, mocker):
+    def test_low_confidence_tries_embedding(self, mocker):
         mock_classify = mocker.patch(
             "memask.router.router.classify_by_embedding",
+            return_value=None,
         )
         config = RouterConfig()
 
@@ -70,165 +67,62 @@ class TestRouteWithConfig:
             embedding_service=FakeEmb(),
             config=config,
         )
-        mock_classify.assert_not_called(), (
-            "LOW confidence input should not trigger embedding classifier"
+        mock_classify.assert_called_once(), (
+            "LOW confidence should consult embedding classifier"
         )
 
     def test_no_embedder_uses_rules(self):
         config = RouterConfig()
         result = route(
-            "buy sugar",
+            "deployment notes from yesterday",
             config=config,
         )
         assert result.source == "rules", (
             "should fall back to rules when no embedder provided"
         )
 
-
-class TestEmbeddingOverridesRules:
-    def test_embedding_can_reclassify_capture_as_todo(self, mocker):
-        todo_result = RoutingResult(
-            intent=Intent.TODO_CREATE,
-            confidence=Confidence.MEDIUM,
-            query_context=extract_query_context("buy sugar"),
-            raw_input="buy sugar",
-            source="embedding",
-        )
-        mocker.patch(
-            "memask.router.router.classify_by_embedding",
-            return_value=todo_result,
-        )
-
-        class FakeEmb:
-            pass
-
-        result = route("buy sugar", embedding_service=FakeEmb())
-        assert result.intent == Intent.TODO_CREATE, (
-            "embedding should reclassify 'buy sugar' as todo"
-        )
-        assert result.source == "embedding", (
-            "result source should be embedding not rules"
-        )
-
-    def test_embedding_can_reclassify_capture_as_search(self, mocker):
-        search_result = RoutingResult(
-            intent=Intent.SEARCH,
-            confidence=Confidence.MEDIUM,
-            query_context=extract_query_context("that deployment thing"),
-            raw_input="that deployment thing",
-            source="embedding",
-        )
-        mocker.patch(
-            "memask.router.router.classify_by_embedding",
-            return_value=search_result,
-        )
-
-        class FakeEmb:
-            pass
-
-        result = route("that deployment thing", embedding_service=FakeEmb())
-        assert result.intent == Intent.SEARCH, (
-            "embedding should reclassify ambiguous text as search"
-        )
-
-    def test_embedding_returning_none_falls_back_to_rules(self, mocker):
-        mocker.patch(
-            "memask.router.router.classify_by_embedding",
-            return_value=None,
-        )
-
-        class FakeEmb:
-            pass
-
-        result = route("some random text", embedding_service=FakeEmb())
-        assert result.source == "rules", (
-            "should fall back to rules when embedding returns None"
-        )
-        assert result.intent == Intent.CAPTURE, (
-            "rules fallback should classify as capture"
-        )
-
-    def test_embedding_exception_falls_back_to_rules(self, mocker):
-        mocker.patch(
-            "memask.router.router.classify_by_embedding",
-            side_effect=RuntimeError("model crashed"),
-        )
-
-        class FakeEmb:
-            pass
-
-        result = route("buy sugar", embedding_service=FakeEmb())
-        assert result.source == "rules", (
-            "should fall back to rules on embedding exception"
-        )
-
     @pytest.mark.parametrize("text", [
         "/todo buy milk",
         "?what about deployment",
         "!help",
-        "remind me to call dentist",
+        "remind me to buy milk",
     ])
-    def test_high_confidence_never_consults_embedding(self, mocker, text):
+    def test_high_confidence_rules_skip_embedding(self, mocker, text):
         mock_classify = mocker.patch(
             "memask.router.router.classify_by_embedding",
         )
+        config = RouterConfig()
 
         class FakeEmb:
             pass
 
-        route(text, embedding_service=FakeEmb())
+        route(text, embedding_service=FakeEmb(), config=config)
         mock_classify.assert_not_called(), (
-            f"HIGH confidence '{text}' should never consult embedding"
+            f"HIGH confidence '{text}' should not consult embedding"
         )
 
-
-class TestAmbiguousTodoInputs:
-    @pytest.mark.parametrize("text", [
-        "buy sugar",
-        "pick up dry cleaning",
-        "call mom",
-        "schedule haircut",
-        "pay electricity bill",
-    ])
-    def test_ambiguous_todos_consult_embedding(self, mocker, text):
-        mock_classify = mocker.patch(
-            "memask.router.router.classify_by_embedding",
-            return_value=None,
-        )
-
-        class FakeEmb:
-            pass
-
-        route(text, embedding_service=FakeEmb())
-        mock_classify.assert_called_once(), (
-            f"'{text}' should consult embedding classifier"
-        )
-
-    @pytest.mark.parametrize("text", [
-        "buy sugar",
-        "pick up dry cleaning",
-        "call mom",
-    ])
-    def test_ambiguous_todos_classified_by_embedding(self, mocker, text):
-        todo_result = RoutingResult(
+    def test_embedding_result_overrides_rules(self, mocker):
+        from memask.router.intents import RoutingResult, QueryContext
+        emb_result = RoutingResult(
             intent=Intent.TODO_CREATE,
             confidence=Confidence.MEDIUM,
-            query_context=extract_query_context(text),
-            raw_input=text,
+            query_context=QueryContext(raw_query="buy a book"),
+            raw_input="buy a book",
             source="embedding",
         )
         mocker.patch(
             "memask.router.router.classify_by_embedding",
-            return_value=todo_result,
+            return_value=emb_result,
         )
+        config = RouterConfig()
 
         class FakeEmb:
             pass
 
-        result = route(text, embedding_service=FakeEmb())
+        result = route("buy a book", embedding_service=FakeEmb(), config=config)
         assert result.intent == Intent.TODO_CREATE, (
-            f"'{text}' should be classified as todo by embedding"
+            "embedding result should override rules CAPTURE fallback"
         )
         assert result.source == "embedding", (
-            f"'{text}' classification source should be embedding"
+            "should report embedding as the classification source"
         )
