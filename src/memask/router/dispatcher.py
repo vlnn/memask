@@ -7,9 +7,10 @@ from memask.models.item import Item
 from memask.rag.pipeline import answer_question
 from memask.repository.items import create_item, list_items, update_item
 from memask.router.intents import Intent
+from memask.router.query_refinement import needs_refinement, refine_search_query
 from memask.router.router import route
 from memask.search.hybrid import hybrid_search
-from memask.search.keyword import keyword_search
+from memask.search.keyword import keyword_search, SearchResult
 
 
 @dataclass(frozen=True)
@@ -56,17 +57,35 @@ def _handle_capture(svc, text, routing):
     )
 
 
+def _date_filter(ctx):
+    if ctx.date_range:
+        return ctx.date_range.start.isoformat(), ctx.date_range.end.isoformat()
+    return None, None
+
+
+def _effective_query(svc, query):
+    if needs_refinement(query) and svc.llm and svc.llm.is_available():
+        return refine_search_query(query, svc.llm)
+    return query
+
+
 def _handle_search(svc, text, routing):
     ctx = routing.query_context
-    query = ctx.raw_query
-    results = _retrieve(svc, query, ctx)
+    search_query = _effective_query(svc, ctx.raw_query)
+
+    if not search_query.strip() and ctx.date_range:
+        return _handle_date_list(svc, ctx)
+
+    results = _retrieve(svc, search_query, ctx)
+
+    synthesis_query = _synthesis_question(text)
 
     session_history = None
     if svc.session is not None:
         session_history = svc.session.history()
 
     answer = answer_question(
-        query,
+        synthesis_query,
         results,
         llm=svc.llm,
         reranker=svc.reranker,
@@ -75,7 +94,7 @@ def _handle_search(svc, text, routing):
 
     if answer.synthesized:
         if svc.session is not None:
-            svc.session.add_exchange(query, answer.answer)
+            svc.session.add_exchange(synthesis_query, answer.answer)
 
         return DispatchResult(
             action="answered",
@@ -96,7 +115,45 @@ def _handle_search(svc, text, routing):
     )
 
 
+def _synthesis_question(text: str) -> str:
+    stripped = text.strip()
+    if stripped.startswith("?"):
+        stripped = stripped[1:].strip()
+    return stripped
+
+
+def _handle_date_list(svc, ctx):
+    date_from, date_to = _date_filter(ctx)
+    all_items = list_items(
+        svc.conn,
+        type=ctx.type_filter,
+        status=ctx.status_filter,
+        date_from=date_from,
+        date_to=date_to,
+        limit=50,
+    )
+    return DispatchResult(
+        action="listed",
+        data={
+            "items": [
+                {
+                    "id": i.id,
+                    "content": i.content,
+                    "type": i.type,
+                    "status": i.status,
+                    "created_at": i.created_at,
+                }
+                for i in all_items
+            ],
+            "date_range": ctx.date_range.label,
+        },
+        items=list(all_items),
+    )
+
+
 def _retrieve(svc, query, ctx):
+    date_from, date_to = _date_filter(ctx)
+
     if svc.store is not None and svc.embedder is not None:
         return hybrid_search(
             svc.conn,
@@ -105,13 +162,16 @@ def _retrieve(svc, query, ctx):
             query,
             type=ctx.type_filter,
             status=ctx.status_filter,
-            date_from=ctx.date_hints[0] if ctx.date_hints else None,
+            date_from=date_from,
+            date_to=date_to,
         )
     return keyword_search(
         svc.conn,
         query,
         type=ctx.type_filter,
         status=ctx.status_filter,
+        date_from=date_from,
+        date_to=date_to,
     )
 
 
@@ -189,9 +249,9 @@ def _handle_app_command(svc, text, routing):
     command = _extract_command_name(text)
 
     command_handlers = {
-        "list": lambda: _handle_list(svc, text),
-        "notes": lambda: _handle_list_shortcut(svc, "note"),
-        "todos": lambda: _handle_list_shortcut(svc, "todo"),
+        "list": lambda: _handle_list(svc, text, routing),
+        "notes": lambda: _handle_list_shortcut(svc, "note", routing),
+        "todos": lambda: _handle_list_shortcut(svc, "todo", routing),
         "done": lambda: _handle_done_bare(svc),
         "undone": lambda: _handle_undone(svc, text),
         "help": lambda: _handle_help(),
@@ -208,45 +268,49 @@ def _handle_app_command(svc, text, routing):
     )
 
 
-def _handle_list(svc, text):
+def _handle_list(svc, text, routing):
     type_filter = _extract_list_type(text)
-    all_items = list_items(svc.conn, type=type_filter, limit=50)
-    return DispatchResult(
-        action="listed",
-        data={
-            "items": [
-                {
-                    "id": i.id,
-                    "content": i.content,
-                    "type": i.type,
-                    "status": i.status,
-                    "created_at": i.created_at,
-                }
-                for i in all_items
-            ],
-        },
-        items=list(all_items),
+    date_from, date_to = _date_filter(routing.query_context)
+    all_items = list_items(
+        svc.conn, type=type_filter, date_from=date_from, date_to=date_to, limit=50,
     )
+    data = {
+        "items": [
+            {
+                "id": i.id,
+                "content": i.content,
+                "type": i.type,
+                "status": i.status,
+                "created_at": i.created_at,
+            }
+            for i in all_items
+        ],
+    }
+    if routing.query_context.date_range:
+        data["date_range"] = routing.query_context.date_range.label
+    return DispatchResult(action="listed", data=data, items=list(all_items))
 
 
-def _handle_list_shortcut(svc, type_filter):
-    all_items = list_items(svc.conn, type=type_filter, limit=50)
-    return DispatchResult(
-        action="listed",
-        data={
-            "items": [
-                {
-                    "id": i.id,
-                    "content": i.content,
-                    "type": i.type,
-                    "status": i.status,
-                    "created_at": i.created_at,
-                }
-                for i in all_items
-            ],
-        },
-        items=list(all_items),
+def _handle_list_shortcut(svc, type_filter, routing):
+    date_from, date_to = _date_filter(routing.query_context)
+    all_items = list_items(
+        svc.conn, type=type_filter, date_from=date_from, date_to=date_to, limit=50,
     )
+    data = {
+        "items": [
+            {
+                "id": i.id,
+                "content": i.content,
+                "type": i.type,
+                "status": i.status,
+                "created_at": i.created_at,
+            }
+            for i in all_items
+        ],
+    }
+    if routing.query_context.date_range:
+        data["date_range"] = routing.query_context.date_range.label
+    return DispatchResult(action="listed", data=data, items=list(all_items))
 
 
 def _handle_done_bare(svc):
@@ -317,9 +381,12 @@ def _handle_help():
         ("/done ...", "Complete a todo (shortcut)"),
         ("/undone ...", "Reopen a completed todo"),
         ("/list", "List all recent items"),
+        ("/list -1w", "List items from last 7 days"),
         ("/notes", "List recent notes"),
         ("/todos", "List pending todos"),
         ("/done", "List completed todos"),
+        ("-1d", "Show everything from yesterday"),
+        ("today", "Show everything from today"),
         ("!help", "Show this help"),
         ("!status", "Show daemon status"),
     ]

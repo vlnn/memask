@@ -187,3 +187,35 @@ class TestListItems:
         result = list_items(conn)
         assert result[0].id == b.id, "newest item should come first"
         assert result[1].id == a.id, "oldest item should come last"
+
+
+class TestListItemsDateFilter:
+    def test_date_from_excludes_older(self, conn):
+        create_item(conn, "old item")
+        result = list_items(conn, date_from="2099-01-01T00:00:00")
+        assert len(result) == 0, "should exclude items before date_from"
+
+    def test_date_to_excludes_newer(self, conn):
+        create_item(conn, "new item")
+        result = list_items(conn, date_to="2000-01-01T00:00:00")
+        assert len(result) == 0, "should exclude items after date_to"
+
+    def test_date_range_includes_matching(self, conn):
+        item = create_item(conn, "today's note")
+        ts = item.created_at
+        result = list_items(conn, date_from=ts, date_to=ts)
+        assert len(result) == 1, "should include item within date range"
+        assert result[0].id == item.id, "should return the matching item"
+
+    def test_date_filters_combine_with_type(self, conn):
+        create_item(conn, "a note", type="note")
+        create_item(conn, "a todo", type="todo", status="pending")
+        result = list_items(conn, type="note", date_from="2000-01-01T00:00:00")
+        assert all(i.type == "note" for i in result), (
+            "date filter should combine with type filter"
+        )
+
+    def test_none_date_filters_ignored(self, conn):
+        create_item(conn, "always visible")
+        result = list_items(conn, date_from=None, date_to=None)
+        assert len(result) == 1, "None date filters should be ignored"

@@ -122,6 +122,8 @@ def list_items(
     type: str | None = None,
     status: str | None = None,
     category: str | None = None,
+    date_from: str | None = None,
+    date_to: str | None = None,
     include_deleted: bool = False,
     limit: int = 100,
 ) -> list[Item]:
@@ -139,6 +141,12 @@ def list_items(
     if category:
         conditions.append("category = ?")
         params.append(category)
+    if date_from:
+        conditions.append("created_at >= ?")
+        params.append(date_from)
+    if date_to:
+        conditions.append("created_at <= ?")
+        params.append(date_to)
 
     where = " AND ".join(conditions) if conditions else "1=1"
     rows = conn.execute(

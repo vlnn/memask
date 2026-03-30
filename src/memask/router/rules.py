@@ -17,6 +17,15 @@ APP_BANG = re.compile(r"^!", re.I)
 APP_SLASH = re.compile(r"^/(?!todo\b|done\b|undone\b)(\w+)", re.I)
 QUESTION_PREFIX = re.compile(r"^\?", re.I)
 
+STANDALONE_DATE_OFFSET = re.compile(r"^[+-]\d+[dwmy]$", re.I)
+STANDALONE_NAMED_DATE = re.compile(
+    r"^(?:today|yesterday|tomorrow"
+    r"|(?:this|last)\s+(?:week|month|year)"
+    r"|last\s+(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday)"
+    r"|\d{4}-\d{2}-\d{2})$",
+    re.I,
+)
+
 QUESTION_STARTERS = re.compile(
     r"^(?:what|when|where|who|how|which|why)\b.*\??\s*$",
     re.I,
@@ -75,6 +84,12 @@ def classify_by_rules(text: str) -> RoutingResult:
         return _result(Intent.APP_COMMAND, Confidence.HIGH, text, ctx)
 
     if QUESTION_PREFIX.match(stripped):
+        return _result(Intent.SEARCH, Confidence.HIGH, text, ctx)
+
+    if STANDALONE_DATE_OFFSET.match(stripped):
+        return _result(Intent.SEARCH, Confidence.HIGH, text, ctx)
+
+    if STANDALONE_NAMED_DATE.match(stripped):
         return _result(Intent.SEARCH, Confidence.HIGH, text, ctx)
 
     if TODO_KEYWORDS.match(stripped):

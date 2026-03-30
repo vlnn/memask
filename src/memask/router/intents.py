@@ -1,6 +1,8 @@
 from dataclasses import dataclass, field
 from enum import Enum
 
+from memask.router.date_range import DateRange
+
 
 class Intent(Enum):
     CAPTURE = "capture"
@@ -20,6 +22,7 @@ class Confidence(Enum):
 @dataclass(frozen=True)
 class QueryContext:
     date_hints: list[str] = field(default_factory=list)
+    date_range: DateRange | None = None
     topic: str | None = None
     type_filter: str | None = None
     status_filter: str | None = None

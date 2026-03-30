@@ -87,7 +87,7 @@ class TestCapturePatterns:
         "talked to alice about the redesign",
         "python 3.12 has nice new features",
         "just learned about lancedb for vector search",
-        "нотатки зі зустрічі з командою",
+        "\u043d\u043e\u0442\u0430\u0442\u043a\u0438 \u0437\u0456 \u0437\u0443\u0441\u0442\u0440\u0456\u0447\u0456 \u0437 \u043a\u043e\u043c\u0430\u043d\u0434\u043e\u044e",
     ])
     def test_plain_statements_route_to_capture(self, text):
         result = classify_by_rules(text)
@@ -156,4 +156,59 @@ class TestEdgeCases:
         result = classify_by_rules(text)
         assert result.intent != Intent.CAPTURE, (
             f"'{text}' should not fall through to capture due to case"
+        )
+
+
+class TestStandaloneDatePatterns:
+    @pytest.mark.parametrize("text", [
+        "-1d",
+        "-1w",
+        "-2w",
+        "-1m",
+        "-3m",
+        "-1y",
+        "+1d",
+        "+1w",
+    ])
+    def test_standalone_offsets_route_to_search(self, text):
+        result = classify_by_rules(text)
+        assert result.intent == Intent.SEARCH, (
+            f"standalone '{text}' should route to SEARCH"
+        )
+        assert result.confidence == Confidence.HIGH, (
+            f"standalone '{text}' should have HIGH confidence"
+        )
+
+    @pytest.mark.parametrize("text", [
+        "today",
+        "yesterday",
+        "tomorrow",
+        "this week",
+        "last week",
+        "this month",
+        "last month",
+        "this year",
+        "last year",
+        "last monday",
+        "last friday",
+        "2026-03-28",
+    ])
+    def test_standalone_named_dates_route_to_search(self, text):
+        result = classify_by_rules(text)
+        assert result.intent == Intent.SEARCH, (
+            f"standalone '{text}' should route to SEARCH"
+        )
+        assert result.confidence == Confidence.HIGH, (
+            f"standalone '{text}' should have HIGH confidence"
+        )
+
+    @pytest.mark.parametrize("text", [
+        "today I learned something new",
+        "yesterday was a good day",
+        "last week we shipped the feature",
+    ])
+    def test_date_with_extra_text_does_not_match_standalone(self, text):
+        result = classify_by_rules(text)
+        assert result.intent != Intent.SEARCH or result.confidence != Confidence.HIGH, (
+            f"'{text}' should NOT match standalone date pattern"
         )

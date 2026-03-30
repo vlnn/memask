@@ -7,7 +7,7 @@ from memask.router.intents import Confidence, Intent, RoutingResult
 from memask.router.query_understanding import extract_query_context
 from memask.search.vector_store import VectorStore
 from memask.search.worker import enqueue_embedding, process_all_pending
-from tests.helpers import FakeEmbeddingService
+from tests.helpers import FakeEmbeddingService, FakeLLM
 
 
 class TestDispatchSignature:
@@ -187,9 +187,7 @@ class TestTodoCreateWithoutPrefix:
         svc = ServiceContext(conn=conn)
         routing = self._make_routing("remind me to buy a book")
         result = _handle_todo_create(svc, "remind me to buy a book", routing)
-        assert result.action == "todo_created", (
-            "prefixed text should still create todo"
-        )
+        assert result.action == "todo_created", "prefixed text should still create todo"
         assert result.data["content"] == "buy a book", (
             "should strip 'remind me to' prefix"
         )
@@ -201,9 +199,7 @@ class TestTodoCreateWithoutPrefix:
         assert result.action == "todo_created", (
             "/todo prefixed text should still create todo"
         )
-        assert result.data["content"] == "buy a book", (
-            "should strip '/todo' prefix"
-        )
+        assert result.data["content"] == "buy a book", "should strip '/todo' prefix"
 
     def test_created_item_is_todo_type(self, conn):
         svc = ServiceContext(conn=conn)
@@ -212,3 +208,140 @@ class TestTodoCreateWithoutPrefix:
         assert result.item is not None, "should return the created item"
         assert result.item.type == "todo", "created item should be type todo"
         assert result.item.status == "pending", "created item should be pending"
+
+
+class TestTimelineQueries:
+    def test_standalone_today_lists_items(self, conn):
+        svc = ServiceContext(conn=conn)
+        create_item(conn, "fresh note")
+        result = dispatch(svc, "today")
+        assert result.action == "listed", (
+            "standalone 'today' should list items in range"
+        )
+        assert len(result.data["items"]) >= 1, "should find today's item"
+        assert result.data.get("date_range") == "today", (
+            "should include date_range label"
+        )
+
+    def test_standalone_offset_lists_items(self, conn):
+        svc = ServiceContext(conn=conn)
+        create_item(conn, "a note")
+        result = dispatch(svc, "-1d")
+        assert result.action == "listed", (
+            "standalone '-1d' should list items"
+        )
+
+    def test_search_with_date_filter(self, conn):
+        svc = ServiceContext(conn=conn)
+        create_item(conn, "deploy to production")
+        result = dispatch(svc, "?deploy today")
+        assert result.action == "searched", (
+            "search with topic and date should still search"
+        )
+
+    def test_list_command_with_date(self, conn):
+        svc = ServiceContext(conn=conn)
+        create_item(conn, "some note")
+        result = dispatch(svc, "/list -1d")
+        assert result.action == "listed", "/list -1d should list items"
+        assert "date_range" in result.data, (
+            "/list with date should include date_range label"
+        )
+
+    def test_notes_command_with_date(self, conn):
+        svc = ServiceContext(conn=conn)
+        create_item(conn, "a note", type="note")
+        create_item(conn, "a todo", type="todo", status="pending")
+        result = dispatch(svc, "/notes -1d")
+        assert result.action == "listed", "/notes -1d should list items"
+        for item in result.data["items"]:
+            assert item["type"] == "note", (
+                "/notes should only return notes even with date filter"
+            )
+
+    def test_standalone_last_week(self, conn):
+        svc = ServiceContext(conn=conn)
+        create_item(conn, "recent note")
+        result = dispatch(svc, "last week")
+        assert result.action == "listed", (
+            "standalone 'last week' should list items"
+        )
+
+
+class TestQueryRefinementInDispatch:
+    def test_natural_language_query_uses_llm_refinement(self, conn, mocker):
+        mock_refine = mocker.patch(
+            "memask.router.dispatcher.refine_search_query",
+            return_value="running",
+        )
+        mocker.patch(
+            "memask.router.dispatcher.needs_refinement",
+            return_value=True,
+        )
+        llm = FakeLLM(response="running")
+        svc = ServiceContext(conn=conn, llm=llm)
+        create_item(conn, "VPN was running and blocking internet")
+        dispatch(svc, "what did I write about running?")
+        mock_refine.assert_called_once(), (
+            "should call refine_search_query for natural language queries"
+        )
+
+    def test_keyword_query_skips_refinement(self, conn, mocker):
+        mock_refine = mocker.patch(
+            "memask.router.dispatcher.refine_search_query",
+        )
+        mocker.patch(
+            "memask.router.dispatcher.needs_refinement",
+            return_value=False,
+        )
+        svc = ServiceContext(conn=conn)
+        create_item(conn, "deployment is broken")
+        dispatch(svc, "?deployment")
+        mock_refine.assert_not_called(), (
+            "should not call refine for keyword queries"
+        )
+
+    def test_no_llm_skips_refinement(self, conn, mocker):
+        mock_refine = mocker.patch(
+            "memask.router.dispatcher.refine_search_query",
+        )
+        mocker.patch(
+            "memask.router.dispatcher.needs_refinement",
+            return_value=True,
+        )
+        svc = ServiceContext(conn=conn)
+        create_item(conn, "some note about running")
+        dispatch(svc, "what did I write about running?")
+        mock_refine.assert_not_called(), (
+            "should not call refine when no LLM available"
+        )
+
+    def test_unavailable_llm_skips_refinement(self, conn, mocker):
+        mock_refine = mocker.patch(
+            "memask.router.dispatcher.refine_search_query",
+        )
+        mocker.patch(
+            "memask.router.dispatcher.needs_refinement",
+            return_value=True,
+        )
+        llm = FakeLLM(available=False)
+        svc = ServiceContext(conn=conn, llm=llm)
+        create_item(conn, "some note about running")
+        dispatch(svc, "what did I write about running?")
+        mock_refine.assert_not_called(), (
+            "should not call refine when LLM is unavailable"
+        )
+
+    def test_refined_query_finds_matching_item(self, conn):
+        llm = FakeLLM(responses=["running", "Based on your notes..."])
+        svc = ServiceContext(conn=conn, llm=llm)
+        create_item(conn, "VPN was running and blocking internet")
+        result = dispatch(svc, "what did I write about running?")
+        assert result.action in ("searched", "answered"), (
+            "refined query should produce search results"
+        )
+        if result.data.get("results"):
+            contents = [r["content"] for r in result.data["results"]]
+            assert any("running" in c.lower() for c in contents), (
+                "refined search should find items matching extracted keywords"
+            )
