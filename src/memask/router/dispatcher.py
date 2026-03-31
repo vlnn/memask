@@ -6,7 +6,7 @@ from typing import Any
 from memask.context import ServiceContext
 from memask.models.item import Item
 from memask.rag.pipeline import answer_question
-from memask.repository.items import create_item, list_items, update_item
+from memask.repository.items import create_item, list_items, update_item, soft_delete_item
 from memask.router.intents import Intent
 from memask.router.query_refinement import needs_refinement, refine_search_query
 from memask.router.router import route
@@ -42,6 +42,7 @@ def dispatch(svc: ServiceContext, text: str) -> DispatchResult:
         Intent.TODO_CREATE: _handle_todo_create,
         Intent.TODO_LIST: _handle_todo_list,
         Intent.TODO_COMPLETE: _handle_todo_complete,
+        Intent.TODO_DELETE: _handle_todo_delete,
         Intent.APP_COMMAND: _handle_app_command,
     }
 
@@ -57,15 +58,18 @@ def _handle_capture(svc, text, routing):
         item=item,
     )
 
+
 def _to_utc_iso(dt):
     if dt.tzinfo is None:
         dt = dt.replace(tzinfo=UTC)
     return dt.isoformat()
 
+
 def _date_filter(ctx):
     if ctx.date_range:
         return _to_utc_iso(ctx.date_range.start), _to_utc_iso(ctx.date_range.end)
     return None, None
+
 
 def _effective_query(svc, query):
     if needs_refinement(query) and svc.llm and svc.llm.is_available():
@@ -76,6 +80,11 @@ def _effective_query(svc, query):
 def _handle_search(svc, text, routing):
     ctx = routing.query_context
     search_query = _effective_query(svc, ctx.raw_query)
+
+    if not search_query:
+        if ctx.date_range:
+            return _handle_date_list(svc, ctx)
+        return DispatchResult(action="searched", data={"results": []})
 
     if not search_query.strip() and ctx.date_range:
         return _handle_date_list(svc, ctx)
@@ -119,81 +128,25 @@ def _handle_search(svc, text, routing):
     )
 
 
-def _synthesis_question(text: str) -> str:
-    stripped = text.strip()
-    if stripped.startswith("?"):
-        stripped = stripped[1:].strip()
-    return stripped
-
-
-def _handle_date_list(svc, ctx):
-    date_from, date_to = _date_filter(ctx)
-    all_items = list_items(
-        svc.conn,
-        type=ctx.type_filter,
-        status=ctx.status_filter,
-        date_from=date_from,
-        date_to=date_to,
-        limit=50,
-    )
-    return DispatchResult(
-        action="listed",
-        data={
-            "items": [
-                {
-                    "id": i.id,
-                    "content": i.content,
-                    "type": i.type,
-                    "status": i.status,
-                    "created_at": i.created_at,
-                }
-                for i in all_items
-            ],
-            "date_range": ctx.date_range.label,
-        },
-        items=list(all_items),
-    )
-
-
-def _retrieve(svc, query, ctx):
-    date_from, date_to = _date_filter(ctx)
-
-    if svc.store is not None and svc.embedder is not None:
-        return hybrid_search(
-            svc.conn,
-            svc.store,
-            svc.embedder,
-            query,
-            type=ctx.type_filter,
-            status=ctx.status_filter,
-            date_from=date_from,
-            date_to=date_to,
-        )
-    return keyword_search(
-        svc.conn,
-        query,
-        type=ctx.type_filter,
-        status=ctx.status_filter,
-        date_from=date_from,
-        date_to=date_to,
-    )
-
-
-def _serialize_results(results):
-    return [
-        {
-            "id": r.item.id,
-            "content": r.item.content,
-            "type": r.item.type,
-            "score": r.score,
-            "source": r.source,
-        }
-        for r in results
-    ]
-
-
 def _handle_todo_create(svc, text, routing):
     content = _extract_todo_content(text) or text.strip()
+    parts = _split_multi_todo(content)
+
+    if len(parts) > 1:
+        items = []
+        for part in parts:
+            item = create_item(svc.conn, part, type="todo", status="pending")
+            items.append(item)
+        return DispatchResult(
+            action="todo_created_batch",
+            data={
+                "items": [
+                    {"id": i.id, "content": i.content} for i in items
+                ],
+            },
+            items=items,
+        )
+
     item = create_item(svc.conn, content, type="todo", status="pending")
     return DispatchResult(
         action="todo_created",
@@ -249,6 +202,39 @@ def _handle_todo_complete(svc, text, routing):
     )
 
 
+def _handle_todo_delete(svc, text, routing):
+    search_text = _extract_delete_query(text)
+    if not search_text:
+        return DispatchResult(
+            action="todo_not_found",
+            data={"message": "Specify which todo to delete."},
+        )
+
+    todos = list_items(svc.conn, type="todo", status="pending")
+    matches = _find_todos(search_text, todos)
+
+    if len(matches) == 0:
+        return DispatchResult(action="todo_not_found")
+
+    if len(matches) == 1:
+        soft_delete_item(svc.conn, matches[0].id)
+        return DispatchResult(
+            action="todo_deleted",
+            data={"id": matches[0].id, "content": matches[0].content},
+        )
+
+    return DispatchResult(
+        action="todo_ambiguous",
+        data={
+            "message": f"Multiple todos match '{search_text}':",
+            "matches": [
+                {"id": t.id, "content": t.content} for t in matches
+            ],
+        },
+        items=list(matches),
+    )
+
+
 def _handle_app_command(svc, text, routing):
     command = _extract_command_name(text)
 
@@ -265,6 +251,9 @@ def _handle_app_command(svc, text, routing):
     handler = command_handlers.get(command)
     if handler:
         return handler()
+
+    if _is_nl_help(text):
+        return _handle_help()
 
     return DispatchResult(
         action="app_command",
@@ -312,8 +301,6 @@ def _handle_list_shortcut(svc, type_filter, routing):
             for i in all_items
         ],
     }
-    if routing.query_context.date_range:
-        data["date_range"] = routing.query_context.date_range.label
     return DispatchResult(action="listed", data=data, items=list(all_items))
 
 
@@ -393,6 +380,9 @@ def _handle_help():
         ("today", "Show everything from today"),
         ("!help", "Show this help"),
         ("!status", "Show daemon status"),
+        ("finished X", "Mark todo X as done"),
+        ("remove X from my todos", "Delete todo X"),
+        ("what's on my todo list?", "List pending todos"),
     ]
     return DispatchResult(
         action="help",
@@ -426,17 +416,77 @@ def _handle_status(svc):
     )
 
 
+def _handle_date_list(svc, ctx):
+    date_from, date_to = _date_filter(ctx)
+    all_items = list_items(
+        svc.conn,
+        type=ctx.type_filter,
+        status=ctx.status_filter,
+        date_from=date_from,
+        date_to=date_to,
+        limit=50,
+    )
+    return DispatchResult(
+        action="listed",
+        data={
+            "items": [
+                {
+                    "id": i.id,
+                    "content": i.content,
+                    "type": i.type,
+                    "status": i.status,
+                    "created_at": i.created_at,
+                }
+                for i in all_items
+            ],
+            "date_range": ctx.date_range.label,
+        },
+        items=list(all_items),
+    )
+
+
+def _retrieve(svc, query, ctx):
+    date_from, date_to = _date_filter(ctx)
+
+    if svc.store is not None and svc.embedder is not None:
+        return hybrid_search(
+            svc.conn, svc.store, svc.embedder, query,
+            type=ctx.type_filter, status=ctx.status_filter,
+            date_from=date_from, date_to=date_to,
+        )
+    return keyword_search(
+        svc.conn, query,
+        type=ctx.type_filter, status=ctx.status_filter,
+        date_from=date_from, date_to=date_to,
+    )
+
+
+def _serialize_results(results):
+    return [
+        {
+            "id": r.item.id,
+            "content": r.item.content,
+            "type": r.item.type,
+            "score": r.score,
+            "source": r.source,
+        }
+        for r in results
+    ]
+
+
+def _synthesis_question(text: str) -> str:
+    stripped = text.strip()
+    if stripped.startswith("?"):
+        stripped = stripped[1:].strip()
+    return stripped
+
+
 def _extract_list_type(text: str) -> str | None:
     m = re.match(r"^/list\s+(\w+)", text.strip(), re.I)
     if not m:
         return None
     word = m.group(1).lower()
-    type_map = {
-        "notes": "note",
-        "note": "note",
-        "todos": "todo",
-        "todo": "todo",
-    }
+    type_map = {"notes": "note", "note": "note", "todos": "todo", "todo": "todo"}
     return type_map.get(word)
 
 
@@ -451,7 +501,7 @@ def _extract_todo_content(text: str) -> str:
         re.compile(r"^remind\s+me\s+(?:to\s+|about\s+)(.+)$", re.I),
         re.compile(r"^remind\s+(?:to\s+|about\s+)(.+)$", re.I),
         re.compile(r"^remind\s+(.+)$", re.I),
-        re.compile(r"^todo[:\s]+(.+)$", re.I),
+        re.compile(r"^todos?[:\s]+(.+)$", re.I),
         re.compile(r"^add\s+todo\s+(.+)$", re.I),
         re.compile(
             r"^(?:i\s+need\s+to|don'?t\s+forget\s+to|remember\s+to|i\s+have\s+to|i\s+must|i\s+should)\s+(.+)$",
@@ -469,6 +519,28 @@ def _extract_complete_query(text: str) -> str:
     for pattern in [
         re.compile(r"^/todo\s+(?:done|complete)\s+(.+)$", re.I),
         re.compile(r"^/done\s+(.+)$", re.I),
+        re.compile(r"^finished\s+(.+)$", re.I),
+        re.compile(r"^i\s+completed\s+(.+)$", re.I),
+        re.compile(r"^i\s+already\s+(.+)$", re.I),
+        re.compile(r"^mark\s+(.+?)\s+as\s+done$", re.I),
+        re.compile(r"^(?:my\s+)?task\s+(?:about\s+)?(.+?)\s+is\s+(?:done|complete)\s*$", re.I),
+        re.compile(r"^(.+?)\s+is\s+(?:done|complete)\s*$", re.I),
+    ]:
+        match = pattern.match(text.strip())
+        if match:
+            return match.group(1).strip()
+    return ""
+
+
+def _extract_delete_query(text: str) -> str:
+    for pattern in [
+        re.compile(r"^remove\s+(.+?)\s+from\s+my\s+(?:todos?|tasks?|list)", re.I),
+        re.compile(r"^delete\s+(?:the\s+)?(?:todo|task)\s+(?:about\s+)?(.+)$", re.I),
+        re.compile(r"^delete\s+(?:my\s+)?(?:todo|task)\s+(?:about\s+)?(.+)$", re.I),
+        re.compile(r"^cancel\s+the\s+(.+?)\s+(?:todo|task|reminder)$", re.I),
+        re.compile(r"^remove\s+the\s+(.+?)\s+(?:task|todo)\s+from\s+my\s+list$", re.I),
+        re.compile(r"^delete\s+(.+)$", re.I),
+        re.compile(r"^remove\s+(.+)$", re.I),
     ]:
         match = pattern.match(text.strip())
         if match:
@@ -481,6 +553,22 @@ def _extract_undone_query(text: str) -> str:
     return m.group(1).strip() if m else ""
 
 
+def _extract_command_name(text: str) -> str:
+    stripped = text.strip()
+    match = re.match(r"^[!/](\w+)", stripped)
+    if match:
+        return match.group(1).lower()
+    return stripped.lower()
+
+
+def _is_nl_help(text: str) -> bool:
+    return bool(re.match(
+        r"(?:what\s+can\s+you\s+do|help\s+me|how\s+does\s+this\s+work)",
+        text.strip(),
+        re.I,
+    ))
+
+
 def _find_todos(query: str, todos: list[Item]) -> list[Item]:
     query_lower = query.lower()
     return [t for t in todos if query_lower in t.content.lower()]
@@ -491,9 +579,9 @@ def _find_todo(query: str, todos: list[Item]) -> Item | None:
     return matches[0] if len(matches) == 1 else None
 
 
-def _extract_command_name(text: str) -> str:
-    stripped = text.strip()
-    match = re.match(r"^[!/](\w+)", stripped)
-    if match:
-        return match.group(1).lower()
-    return stripped.lower()
+def _split_multi_todo(content: str) -> list[str]:
+    normalized = re.sub(r",\s*and\s+", ", ", content)
+    if "," not in normalized:
+        return [content.strip()]
+    parts = [p.strip() for p in normalized.split(",")]
+    return [p for p in parts if p]

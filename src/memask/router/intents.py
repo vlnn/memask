@@ -10,6 +10,8 @@ class Intent(Enum):
     TODO_CREATE = "todo_create"
     TODO_LIST = "todo_list"
     TODO_COMPLETE = "todo_complete"
+    TODO_DELETE = "todo_delete"
+    TODO_UPDATE = "todo_update"
     APP_COMMAND = "app_command"
 
 

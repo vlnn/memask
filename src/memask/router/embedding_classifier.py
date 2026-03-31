@@ -51,6 +51,20 @@ INTENT_EXEMPLARS: dict[Intent, list[str]] = {
         "mark buy milk as complete",
         "completed the deployment",
     ],
+    Intent.TODO_DELETE: [
+        "remove buy milk from my list",
+        "delete the deployment task",
+        "cancel the dentist reminder",
+        "remove the meeting todo from my todos",
+        "get rid of the grocery task",
+    ],
+    Intent.TODO_UPDATE: [
+        "change the meeting todo to next thursday",
+        "update the buy milk task to buy oat milk",
+        "reschedule the dentist to friday",
+        "rename the deploy task to staging deploy",
+        "move the deadline for the report to monday",
+    ],
 }
 
 SIMILARITY_THRESHOLD = 0.35

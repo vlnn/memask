@@ -39,7 +39,7 @@ SEARCH_KEYWORDS = re.compile(
 
 TODO_KEYWORDS = re.compile(
     r"^(?:remind\s+(?:me\s+)?(?:to\s+|about\s+)?"
-    r"|todo[:\s]"
+    r"|todos?[:\s]"
     r"|add\s+todo\b)",
     re.I,
 )
@@ -48,6 +48,39 @@ TODO_SOFT_KEYWORDS = re.compile(
     r"^(?:i\s+need\s+to|don'?t\s+forget\s+to"
     r"|remember\s+to|i\s+have\s+to"
     r"|i\s+must|i\s+should)\b",
+    re.I,
+)
+
+NL_COMPLETION = re.compile(
+    r"(?:^finished\s+|^i\s+completed\s+|^i\s+already\s+|^mark\s+.+\s+as\s+done$"
+    r"|\bis\s+(?:done|complete)\s*$"
+    r"|\bis\s+(?:done|complete)\s*[\?!.]?\s*$)",
+    re.I,
+)
+
+NL_DELETION = re.compile(
+    r"(?:^remove\s+.+\s+from\s+my\s+(?:todos?|tasks?|list)"
+    r"|^delete\s+(?:the\s+)?(?:todo|task|my\s+todo)\b"
+    r"|^cancel\s+the\s+.+\s+(?:todo|task|reminder)"
+    r"|^delete\s+my\s+todo\b"
+    r"|^remove\s+the\s+.+\s+(?:task|todo)\s+from\s+my\s+list)",
+    re.I,
+)
+
+NL_TODO_LIST = re.compile(
+    r"(?:^what(?:'s| is)\s+on\s+my\s+(?:todo\s+)?list"
+    r"|^show\s+(?:me\s+)?my\s+(?:todos?|tasks?)"
+    r"|^any\s+pending\s+(?:todos?|tasks?)"
+    r"|^what\s+do\s+i\s+need\s+to\s+do"
+    r"|^what\s+are\s+my\s+(?:pending\s+)?(?:todos?|tasks?)"
+    r"|^show\s+me\s+my\s+(?:todos?|tasks?))",
+    re.I,
+)
+
+NL_HELP = re.compile(
+    r"(?:^what\s+can\s+you\s+do"
+    r"|^help\s+me$"
+    r"|^how\s+does\s+this\s+work)",
     re.I,
 )
 
@@ -95,6 +128,18 @@ def classify_by_rules(text: str) -> RoutingResult:
     if TODO_KEYWORDS.match(stripped):
         return _result(Intent.TODO_CREATE, Confidence.HIGH, text, ctx)
 
+    if NL_TODO_LIST.match(stripped):
+        return _result(Intent.TODO_LIST, Confidence.MEDIUM, text, ctx)
+
+    if NL_HELP.match(stripped):
+        return _result(Intent.APP_COMMAND, Confidence.MEDIUM, text, ctx)
+
+    if NL_COMPLETION.search(stripped):
+        return _result(Intent.TODO_COMPLETE, Confidence.MEDIUM, text, ctx)
+
+    if NL_DELETION.match(stripped):
+        return _result(Intent.TODO_DELETE, Confidence.MEDIUM, text, ctx)
+
     if TODO_SOFT_KEYWORDS.match(stripped):
         return _result(Intent.TODO_CREATE, Confidence.MEDIUM, text, ctx)
 
@@ -119,12 +164,7 @@ def _has_query_signals(text: str) -> bool:
     return any(re.search(p, lower) for p in query_signals)
 
 
-def _result(
-    intent: Intent,
-    confidence: Confidence,
-    raw_input: str,
-    query_context,
-) -> RoutingResult:
+def _result(intent, confidence, raw_input, query_context):
     return RoutingResult(
         intent=intent,
         confidence=confidence,
