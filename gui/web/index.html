@@ -277,12 +277,18 @@
       border-bottom: 1px solid var(--border-light);
       font-size: 13px;
       color: var(--text);
-      cursor: pointer;
       transition: background 0.1s;
     }
 
     .input-recent-row:hover { background: var(--hover-bg); }
     .input-recent-row:last-child { border-bottom: none; }
+
+    .input-recent-row.done .input-recent-text {
+      text-decoration: line-through;
+      color: var(--text-faint);
+    }
+
+    .input-recent-row.done .input-recent-time { opacity: 0.5; }
 
     .input-recent-type {
       flex-shrink: 0;
@@ -293,7 +299,12 @@
       font-weight: 600;
       text-transform: uppercase;
       letter-spacing: 0.5px;
+      cursor: pointer;
+      transition: opacity 0.15s;
+      user-select: none;
     }
+
+    .input-recent-type:hover { opacity: 0.7; }
 
     .input-recent-type.note { background: var(--tag-note-bg); color: var(--tag-note-fg); }
     .input-recent-type.todo { background: var(--tag-todo-bg); color: var(--tag-todo-fg); }
@@ -305,6 +316,7 @@
       text-overflow: ellipsis;
       white-space: nowrap;
       color: var(--text-strong);
+      cursor: pointer;
     }
 
     .input-recent-time {
@@ -312,6 +324,39 @@
       font-size: 11px;
       color: var(--text-faint);
     }
+
+    .input-recent-actions {
+      display: none;
+      flex-shrink: 0;
+      gap: 2px;
+      align-items: center;
+    }
+
+    .input-recent-row:hover .input-recent-actions { display: flex; }
+    .input-recent-row:hover .input-recent-time { display: none; }
+
+    .ir-action {
+      background: none;
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      color: var(--text-muted);
+      font-size: 12px;
+      width: 24px;
+      height: 22px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      transition: color 0.15s, border-color 0.15s;
+      padding: 0;
+      font-family: inherit;
+      line-height: 1;
+    }
+
+    .ir-action:hover { color: var(--text-strong); border-color: var(--text-muted); }
+    .ir-action.ir-done:hover { color: var(--success); border-color: var(--success); }
+    .ir-action.ir-undone:hover { color: var(--accent); border-color: var(--accent); }
+    .ir-action.ir-delete:hover { color: var(--error); border-color: var(--error); }
 
     /* ── todo view ──────────────────────────────────── */
 
@@ -327,10 +372,7 @@
       flex-shrink: 0;
     }
 
-    #todo-count {
-      font-size: 13px;
-      color: var(--text-muted);
-    }
+    #todo-count { font-size: 13px; color: var(--text-muted); }
 
     .refresh-btn {
       background: none;
@@ -367,56 +409,24 @@
     .todo-row:last-child { border-bottom: none; }
 
     .todo-checkbox {
-      width: 18px;
-      height: 18px;
+      width: 18px; height: 18px;
       border: 2px solid var(--spinner-bg);
       border-radius: 50%;
       flex-shrink: 0;
-      display: flex;
-      align-items: center;
-      justify-content: center;
+      display: flex; align-items: center; justify-content: center;
       cursor: pointer;
       transition: border-color 0.15s, background 0.15s;
     }
 
     .todo-row:hover .todo-checkbox { border-color: var(--accent); }
+    .todo-row .todo-checkbox.completing { border-color: var(--success); background: var(--success); }
+    .todo-row .todo-checkbox.completing::after { content: "✓"; color: var(--check-bg); font-size: 11px; font-weight: bold; }
 
-    .todo-row .todo-checkbox.completing {
-      border-color: var(--success);
-      background: var(--success);
-    }
+    .todo-text { flex: 1; color: var(--text-strong); font-size: 14px; line-height: 1.4; }
+    .todo-text.completing { color: var(--completing-text); text-decoration: line-through; }
 
-    .todo-row .todo-checkbox.completing::after {
-      content: "✓";
-      color: var(--check-bg);
-      font-size: 11px;
-      font-weight: bold;
-    }
-
-    .todo-text {
-      flex: 1;
-      color: var(--text-strong);
-      font-size: 14px;
-      line-height: 1.4;
-    }
-
-    .todo-text.completing {
-      color: var(--completing-text);
-      text-decoration: line-through;
-    }
-
-    .todo-empty {
-      padding: 32px 16px;
-      text-align: center;
-      color: var(--text-faint);
-      font-size: 14px;
-    }
-
-    .todo-error {
-      padding: 16px;
-      color: var(--error);
-      font-size: 13px;
-    }
+    .todo-empty { padding: 32px 16px; text-align: center; color: var(--text-faint); font-size: 14px; }
+    .todo-error { padding: 16px; color: var(--error); font-size: 13px; }
 
     /* ── recent view ────────────────────────────────── */
 
@@ -424,121 +434,55 @@
     #recent-view.active { display: flex; }
 
     #recent-header {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      padding: 10px 16px;
-      border-bottom: 1px solid var(--border);
-      flex-shrink: 0;
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 10px 16px; border-bottom: 1px solid var(--border); flex-shrink: 0;
     }
 
-    #recent-count {
-      font-size: 13px;
-      color: var(--text-muted);
-    }
+    #recent-count { font-size: 13px; color: var(--text-muted); }
 
     #recent-list {
-      flex: 1;
-      overflow-y: auto;
-      padding: 4px 0;
-      scrollbar-width: thin;
-      scrollbar-color: var(--scroll-thumb) transparent;
+      flex: 1; overflow-y: auto; padding: 4px 0;
+      scrollbar-width: thin; scrollbar-color: var(--scroll-thumb) transparent;
     }
 
-    .recent-row {
-      padding: 10px 16px;
-      border-bottom: 1px solid var(--border-light);
-    }
-
+    .recent-row { padding: 10px 16px; border-bottom: 1px solid var(--border-light); }
     .recent-row:last-child { border-bottom: none; }
-
     .recent-content { color: var(--text-strong); font-size: 14px; line-height: 1.4; }
-
-    .recent-meta {
-      font-size: 12px;
-      color: var(--text-muted);
-      margin-top: 2px;
-    }
+    .recent-meta { font-size: 12px; color: var(--text-muted); margin-top: 2px; }
 
     .recent-type {
-      display: inline-block;
-      padding: 1px 6px;
-      border-radius: 3px;
-      font-size: 11px;
-      margin-right: 6px;
+      display: inline-block; padding: 1px 6px; border-radius: 3px;
+      font-size: 11px; margin-right: 6px;
     }
 
     .recent-type.note { background: var(--tag-note-bg); color: var(--tag-note-fg); }
     .recent-type.todo { background: var(--tag-todo-bg); color: var(--tag-todo-fg); }
     .recent-type.other { background: var(--tag-other-bg); color: var(--tag-other-fg); }
-
-    .recent-empty {
-      padding: 32px 16px;
-      text-align: center;
-      color: var(--text-faint);
-      font-size: 14px;
-    }
+    .recent-empty { padding: 32px 16px; text-align: center; color: var(--text-faint); font-size: 14px; }
 
     /* ── settings view ──────────────────────────────── */
 
     #settings-view { display: none; flex-direction: column; flex: 1; min-height: 0; }
     #settings-view.active { display: flex; }
 
-    .settings-content {
-      flex: 1;
-      overflow-y: auto;
-      padding: 16px;
-    }
-
-    .settings-section {
-      margin-bottom: 20px;
-    }
-
-    .settings-section-title {
-      font-size: 11px;
-      text-transform: uppercase;
-      letter-spacing: 0.05em;
-      color: var(--text-muted);
-      margin-bottom: 10px;
-    }
+    .settings-content { flex: 1; overflow-y: auto; padding: 16px; }
+    .settings-section { margin-bottom: 20px; }
+    .settings-section-title { font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-muted); margin-bottom: 10px; }
 
     .settings-row {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      padding: 10px 0;
-      border-bottom: 1px solid var(--border-light);
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 10px 0; border-bottom: 1px solid var(--border-light);
     }
 
     .settings-row:last-child { border-bottom: none; }
+    .settings-label { font-size: 14px; color: var(--text-strong); }
+    .settings-desc { font-size: 12px; color: var(--text-muted); margin-top: 2px; }
 
-    .settings-label {
-      font-size: 14px;
-      color: var(--text-strong);
-    }
-
-    .settings-desc {
-      font-size: 12px;
-      color: var(--text-muted);
-      margin-top: 2px;
-    }
-
-    .theme-switcher {
-      display: flex;
-      gap: 0;
-      border: 1px solid var(--border);
-      border-radius: 6px;
-      overflow: hidden;
-    }
+    .theme-switcher { display: flex; gap: 0; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
 
     .theme-btn {
-      padding: 5px 12px;
-      font-size: 12px;
-      font-family: inherit;
-      border: none;
-      cursor: pointer;
-      background: transparent;
-      color: var(--text-muted);
+      padding: 5px 12px; font-size: 12px; font-family: inherit; border: none;
+      cursor: pointer; background: transparent; color: var(--text-muted);
       transition: background 0.15s, color 0.15s;
     }
 
@@ -549,97 +493,33 @@
     /* ── shared response styles ─────────────────────── */
 
     .msg { padding: 6px 0; line-height: 1.5; }
-
-    .msg-success {
-      color: var(--success);
-      display: flex;
-      align-items: baseline;
-      gap: 8px;
-    }
-
+    .msg-success { color: var(--success); display: flex; align-items: baseline; gap: 8px; }
     .msg-success .check { flex-shrink: 0; }
-
-    .msg-error {
-      color: var(--error);
-      display: flex;
-      align-items: baseline;
-      gap: 8px;
-    }
-
+    .msg-error { color: var(--error); display: flex; align-items: baseline; gap: 8px; }
     .msg-answer { color: var(--text-strong); }
-
-    .sources {
-      margin-top: 8px;
-      font-size: 13px;
-      color: var(--text-muted);
-    }
-
+    .sources { margin-top: 8px; font-size: 13px; color: var(--text-muted); }
     .sources span { color: var(--accent); }
-
-    .source-num {
-      color: var(--accent);
-      font-size: 12px;
-      font-weight: 600;
-      margin-right: 4px;
-    }
-
+    .source-num { color: var(--accent); font-size: 12px; font-weight: 600; margin-right: 4px; }
     .result-list { list-style: none; }
-
-    .result-item {
-      padding: 8px 0;
-      border-bottom: 1px solid var(--border-light);
-    }
-
+    .result-item { padding: 8px 0; border-bottom: 1px solid var(--border-light); }
     .result-item:last-child { border-bottom: none; }
-
     .result-content { color: var(--text-strong); }
-
-    .result-meta {
-      font-size: 12px;
-      color: var(--text-muted);
-      margin-top: 2px;
-    }
-
-    .todo-item {
-      padding: 6px 0;
-      display: flex;
-      align-items: baseline;
-      gap: 8px;
-    }
-
-    .todo-bullet {
-      color: var(--accent);
-      flex-shrink: 0;
-    }
-
+    .result-meta { font-size: 12px; color: var(--text-muted); margin-top: 2px; }
+    .todo-item { padding: 6px 0; display: flex; align-items: baseline; gap: 8px; }
+    .todo-bullet { color: var(--accent); flex-shrink: 0; }
     .todo-content { color: var(--text-strong); }
-
-    .hint {
-      font-size: 12px;
-      color: var(--text-faint);
-      padding: 8px 0;
-    }
+    .hint { font-size: 12px; color: var(--text-faint); padding: 8px 0; }
 
     /* ── status bar ─────────────────────────────────── */
 
     #status-bar {
-      flex-shrink: 0;
-      padding: 4px 16px;
-      font-size: 11px;
-      color: var(--text-faint);
-      display: flex;
-      justify-content: space-between;
-      border-top: 1px solid var(--border-light);
+      flex-shrink: 0; padding: 4px 16px; font-size: 11px; color: var(--text-faint);
+      display: flex; justify-content: space-between; border-top: 1px solid var(--border-light);
     }
 
     #status-dot {
-      display: inline-block;
-      width: 6px;
-      height: 6px;
-      border-radius: 50%;
-      background: var(--text-faint);
-      margin-right: 4px;
-      vertical-align: middle;
+      display: inline-block; width: 6px; height: 6px; border-radius: 50%;
+      background: var(--text-faint); margin-right: 4px; vertical-align: middle;
     }
 
     #status-dot.ok { background: var(--success); }
@@ -647,52 +527,13 @@
 
     /* ── setup banner ──────────────────────────────── */
 
-    #setup-banner {
-      display: none;
-      flex-shrink: 0;
-      padding: 10px 16px;
-      font-size: 13px;
-      line-height: 1.5;
-      border-bottom: 1px solid var(--border);
-    }
-
+    #setup-banner { display: none; flex-shrink: 0; padding: 10px 16px; font-size: 13px; line-height: 1.5; border-bottom: 1px solid var(--border); }
     #setup-banner.active { display: block; }
-
-    #setup-banner.warn {
-      background: var(--banner-warn-bg);
-      color: var(--warn);
-    }
-
-    #setup-banner.err {
-      background: var(--banner-err-bg);
-      color: var(--error);
-    }
-
-    .banner-title {
-      font-weight: 600;
-      margin-bottom: 2px;
-    }
-
-    .banner-cmd {
-      font-family: "SF Mono", "Fira Code", "Consolas", monospace;
-      font-size: 12px;
-      background: var(--code-bg);
-      padding: 2px 6px;
-      border-radius: 3px;
-    }
-
-    .banner-dismiss {
-      float: right;
-      background: none;
-      border: none;
-      color: inherit;
-      cursor: pointer;
-      opacity: 0.5;
-      font-size: 14px;
-      padding: 0 0 0 8px;
-      line-height: 1;
-    }
-
+    #setup-banner.warn { background: var(--banner-warn-bg); color: var(--warn); }
+    #setup-banner.err { background: var(--banner-err-bg); color: var(--error); }
+    .banner-title { font-weight: 600; margin-bottom: 2px; }
+    .banner-cmd { font-family: "SF Mono", "Fira Code", "Consolas", monospace; font-size: 12px; background: var(--code-bg); padding: 2px 6px; border-radius: 3px; }
+    .banner-dismiss { float: right; background: none; border: none; color: inherit; cursor: pointer; opacity: 0.5; font-size: 14px; padding: 0 0 0 8px; line-height: 1; }
     .banner-dismiss:hover { opacity: 1; }
   </style>
 </head>
@@ -757,22 +598,13 @@
         <div class="settings-section">
           <div class="settings-section-title">Info</div>
           <div class="settings-row">
-            <div>
-              <div class="settings-label">Daemon</div>
-              <div class="settings-desc">http://127.0.0.1:7394</div>
-            </div>
+            <div><div class="settings-label">Daemon</div><div class="settings-desc">http://127.0.0.1:7394</div></div>
           </div>
           <div class="settings-row">
-            <div>
-              <div class="settings-label">Hotkey</div>
-              <div class="settings-desc">⌘⇧Space</div>
-            </div>
+            <div><div class="settings-label">Hotkey</div><div class="settings-desc">⌘⇧Space</div></div>
           </div>
           <div class="settings-row">
-            <div>
-              <div class="settings-label">Version</div>
-              <div class="settings-desc">0.1.0</div>
-            </div>
+            <div><div class="settings-label">Version</div><div class="settings-desc">0.1.0</div></div>
           </div>
         </div>
       </div>
@@ -795,15 +627,12 @@
         effective = window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
       }
       document.documentElement.setAttribute("data-theme", effective);
-
       document.querySelectorAll(".theme-btn").forEach(btn => {
         btn.classList.toggle("active", btn.dataset.theme === choice);
       });
     }
 
-    function savedTheme() {
-      return localStorage.getItem("memask-theme") || "dark";
-    }
+    function savedTheme() { return localStorage.getItem("memask-theme") || "dark"; }
 
     function setTheme(choice) {
       localStorage.setItem("memask-theme", choice);
@@ -838,6 +667,22 @@
       return resp.json();
     }
 
+    async function patchItem(itemId, fields) {
+      const resp = await fetch(`${DAEMON}/items/${itemId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(fields),
+      });
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      return resp.json();
+    }
+
+    async function deleteItem(itemId) {
+      const resp = await fetch(`${DAEMON}/items/${itemId}`, { method: "DELETE" });
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      return resp.json();
+    }
+
     /* ── tab switching ──────────────────────────────── */
 
     let activeView = "input";
@@ -845,11 +690,9 @@
     function switchView(view) {
       if (activeView === view) return;
       activeView = view;
-
       document.querySelectorAll(".tab").forEach(t => {
         t.classList.toggle("active", t.dataset.view === view);
       });
-
       document.getElementById("input-view").classList.toggle("hidden", view !== "input");
       document.getElementById("todo-view").classList.toggle("active", view === "todos");
       document.getElementById("recent-view").classList.toggle("active", view === "recent");
@@ -865,10 +708,8 @@
     async function loadTodos() {
       const list = document.getElementById("todo-list");
       const count = document.getElementById("todo-count");
-
       list.innerHTML = '<div class="todo-empty">Loading…</div>';
       count.textContent = "";
-
       try {
         const data = await fetchItems("todo", "pending");
         const items = data.items || [];
@@ -882,12 +723,7 @@
 
     function renderTodoList(items) {
       const list = document.getElementById("todo-list");
-
-      if (items.length === 0) {
-        list.innerHTML = '<div class="todo-empty">No pending todos.</div>';
-        return;
-      }
-
+      if (items.length === 0) { list.innerHTML = '<div class="todo-empty">No pending todos.</div>'; return; }
       list.innerHTML = items.map(t =>
         `<div class="todo-row" data-id="${esc(t.id)}" data-content="${esc(t.content)}">
           <div class="todo-checkbox"></div>
@@ -897,15 +733,12 @@
     }
 
     async function completeTodo(row) {
-      const content = row.dataset.content;
       const checkbox = row.querySelector(".todo-checkbox");
       const text = row.querySelector(".todo-text");
-
       checkbox.classList.add("completing");
       text.classList.add("completing");
-
       try {
-        await postInput(`/todo done ${content}`);
+        await postInput(`/todo done ${row.dataset.content}`);
         setTimeout(loadTodos, 300);
       } catch {
         checkbox.classList.remove("completing");
@@ -918,10 +751,8 @@
     async function loadRecent() {
       const list = document.getElementById("recent-list");
       const count = document.getElementById("recent-count");
-
       list.innerHTML = '<div class="recent-empty">Loading…</div>';
       count.textContent = "";
-
       try {
         const data = await fetchItems(null, null);
         const items = data.items || [];
@@ -935,12 +766,7 @@
 
     function renderRecentList(items) {
       const list = document.getElementById("recent-list");
-
-      if (items.length === 0) {
-        list.innerHTML = '<div class="recent-empty">No items yet.</div>';
-        return;
-      }
-
+      if (items.length === 0) { list.innerHTML = '<div class="recent-empty">No items yet.</div>'; return; }
       list.innerHTML = items.map(item => {
         const typeClass = (item.type === "note" || item.type === "todo") ? item.type : "other";
         const meta = [item.type];
@@ -968,7 +794,6 @@
 
     function renderInputRecent(items) {
       const el = document.getElementById("input-recent");
-
       if (items.length === 0) {
         el.innerHTML = '<div style="padding:32px 16px;text-align:center;color:var(--text-faint);font-size:14px">No items yet.</div>';
         return;
@@ -976,10 +801,26 @@
 
       el.innerHTML = items.map(item => {
         const typeClass = (item.type === "note" || item.type === "todo") ? item.type : "other";
+        const isDone = item.status === "done";
+        const rowClass = "input-recent-row" + (isDone ? " done" : "");
         const ts = item.created_at ? item.created_at.slice(0, 16).replace("T", " ") : "";
-        return `<div class="input-recent-row" data-id="${esc(item.id)}" data-content="${esc(item.content)}" data-type="${esc(item.type)}">
-          <span class="input-recent-type ${typeClass}">${esc(item.type)}</span>
+
+        const isTodo = item.type === "todo";
+        let statusBtn = "";
+        if (isTodo && isDone) {
+          statusBtn = `<button class="ir-action ir-undone" title="Reopen">↩</button>`;
+        } else if (isTodo) {
+          statusBtn = `<button class="ir-action ir-done" title="Mark done">✓</button>`;
+        }
+
+        return `<div class="${rowClass}" data-id="${esc(item.id)}" data-content="${esc(item.content)}" data-type="${esc(item.type)}" data-status="${esc(item.status || "")}">
+          <span class="input-recent-type ${typeClass}" title="Click to toggle note↔todo">${esc(item.type)}</span>
           <span class="input-recent-text">${esc(item.content)}</span>
+          <span class="input-recent-actions">
+            ${statusBtn}
+            <button class="ir-action ir-edit" title="Edit">✎</button>
+            <button class="ir-action ir-delete" title="Delete">×</button>
+          </span>
           <span class="input-recent-time">${esc(ts)}</span>
         </div>`;
       }).join("");
@@ -991,46 +832,56 @@
       recent.classList.toggle("hidden", response.innerHTML.trim() !== "");
     }
 
+    async function toggleItemType(row) {
+      const id = row.dataset.id;
+      const newType = row.dataset.type === "note" ? "todo" : "note";
+      const fields = { type: newType };
+      if (newType === "todo") fields.status = "pending";
+      if (newType === "note") fields.status = null;
+      try { await patchItem(id, fields); loadInputRecent(); }
+      catch (err) { setResponse(renderError(err.message)); }
+    }
+
+    async function toggleItemStatus(row) {
+      const id = row.dataset.id;
+      const newStatus = row.dataset.status === "done" ? "pending" : "done";
+      try { await patchItem(id, { status: newStatus }); loadInputRecent(); }
+      catch (err) { setResponse(renderError(err.message)); }
+    }
+
+    async function deleteItemFromRecent(row) {
+      try { await deleteItem(row.dataset.id); loadInputRecent(); }
+      catch (err) { setResponse(renderError(err.message)); }
+    }
+
+    function editItemFromRecent(row) {
+      const input = document.getElementById("input");
+      input.value = row.dataset.content;
+      enterEditMode(row.dataset.id, row.dataset.type);
+    }
+
     /* ── response renderers ─────────────────────────── */
 
     function renderCaptured(data) {
-      return `<div class="msg msg-success">
-        <span class="check">✓</span>
-        <span>Captured: ${esc(data.content || "")}</span>
-      </div>`;
+      return `<div class="msg msg-success"><span class="check">✓</span><span>Captured: ${esc(data.content || "")}</span></div>`;
     }
 
     function renderTodoCreated(data) {
-      return `<div class="msg msg-success">
-        <span class="check">✓</span>
-        <span>Todo added: ${esc(data.content || "")}</span>
-      </div>`;
+      return `<div class="msg msg-success"><span class="check">✓</span><span>Todo added: ${esc(data.content || "")}</span></div>`;
     }
 
     function renderTodoCompleted(data) {
-      return `<div class="msg msg-success">
-        <span class="check">✓</span>
-        <span>Done: ${esc(data.content || "")}</span>
-      </div>`;
+      return `<div class="msg msg-success"><span class="check">✓</span><span>Done: ${esc(data.content || "")}</span></div>`;
     }
 
     function renderTodoNotFound() {
-      return `<div class="msg msg-error">
-        <span>✗</span>
-        <span>No matching todo found.</span>
-      </div>`;
+      return `<div class="msg msg-error"><span>✗</span><span>No matching todo found.</span></div>`;
     }
 
     function renderTodoListed(data) {
       const items = data.items || [];
       if (items.length === 0) return `<div class="msg hint">No pending todos.</div>`;
-      const lis = items.map(t =>
-        `<div class="todo-item">
-          <span class="todo-bullet">○</span>
-          <span class="todo-content">${esc(t.content)}</span>
-        </div>`
-      ).join("");
-      return `<div>${lis}</div>`;
+      return `<div>${items.map(t => `<div class="todo-item"><span class="todo-bullet">○</span><span class="todo-content">${esc(t.content)}</span></div>`).join("")}</div>`;
     }
 
     function renderAnswered(data) {
@@ -1039,10 +890,7 @@
       if (results.length > 0) {
         html += `<div class="sources">Sources:</div>`;
         html += results.map((r, i) =>
-          `<div class="result-item">
-            <div class="result-content"><span class="source-num">[${i + 1}]</span> ${esc(r.content)}</div>
-            <div class="result-meta">${esc(r.type || "note")} · score ${(r.score || 0).toFixed(2)}</div>
-          </div>`
+          `<div class="result-item"><div class="result-content"><span class="source-num">[${i + 1}]</span> ${esc(r.content)}</div><div class="result-meta">${esc(r.type || "note")} · score ${(r.score || 0).toFixed(2)}</div></div>`
         ).join("");
       }
       return html;
@@ -1051,13 +899,9 @@
     function renderSearched(data) {
       const results = data.results || [];
       if (results.length === 0) return `<div class="msg hint">No results found.</div>`;
-      const lis = results.map(r =>
-        `<div class="result-item">
-          <div class="result-content">${esc(r.content)}</div>
-          <div class="result-meta">${esc(r.type || "note")} · score ${(r.score || 0).toFixed(2)}</div>
-        </div>`
-      ).join("");
-      return `<ul class="result-list">${lis}</ul>`;
+      return `<ul class="result-list">${results.map(r =>
+        `<div class="result-item"><div class="result-content">${esc(r.content)}</div><div class="result-meta">${esc(r.type || "note")} · score ${(r.score || 0).toFixed(2)}</div></div>`
+      ).join("")}</ul>`;
     }
 
     function renderAppCommand(data) {
@@ -1067,33 +911,22 @@
     function renderListed(data) {
       const items = data.items || [];
       if (items.length === 0) return `<div class="msg hint">No items found.</div>`;
-      const lis = items.map(item => {
+      return `<ul class="result-list">${items.map(item => {
         const meta = [item.type];
         if (item.status) meta.push(item.status);
-        return `<div class="result-item">
-          <div class="result-content">${esc(item.content)}</div>
-          <div class="result-meta">${esc(meta.join(" · "))}</div>
-        </div>`;
-      }).join("");
-      return `<ul class="result-list">${lis}</ul>`;
+        return `<div class="result-item"><div class="result-content">${esc(item.content)}</div><div class="result-meta">${esc(meta.join(" · "))}</div></div>`;
+      }).join("")}</ul>`;
     }
 
     function renderServerError(data) {
-      return `<div class="msg msg-error">
-        <span>✗</span>
-        <span>${esc(data.message || "Unknown error")}</span>
-      </div>`;
+      return `<div class="msg msg-error"><span>✗</span><span>${esc(data.message || "Unknown error")}</span></div>`;
     }
 
     function renderHelp(data) {
       const cmds = data.commands || [];
-      const rows = cmds.map(c =>
-        `<div style="display:flex;gap:12px;padding:4px 0;border-bottom:1px solid var(--border-light)">
-          <span style="min-width:160px;font-family:'SF Mono','Fira Code','Consolas',monospace;font-size:12px;color:var(--accent)">${esc(c.command)}</span>
-          <span style="color:var(--text)">${esc(c.description)}</span>
-        </div>`
-      ).join("");
-      return `<div>${rows}</div>`;
+      return `<div>${cmds.map(c =>
+        `<div style="display:flex;gap:12px;padding:4px 0;border-bottom:1px solid var(--border-light)"><span style="min-width:160px;font-family:'SF Mono','Fira Code','Consolas',monospace;font-size:12px;color:var(--accent)">${esc(c.command)}</span><span style="color:var(--text)">${esc(c.description)}</span></div>`
+      ).join("")}</div>`;
     }
 
     function renderStatus(data) {
@@ -1105,36 +938,23 @@
       ];
       const jobs = data.jobs || {};
       const jobEntries = Object.entries(jobs);
-      if (jobEntries.length > 0) {
-        lines.push(`Jobs: ${jobEntries.map(([k,v]) => k + "=" + v).join(", ")}`);
-      }
+      if (jobEntries.length > 0) lines.push(`Jobs: ${jobEntries.map(([k,v]) => k + "=" + v).join(", ")}`);
       return `<div class="msg">${lines.map(l => `<div style="padding:2px 0;color:var(--text)">${esc(l)}</div>`).join("")}</div>`;
     }
 
     function renderTodoAmbiguous(data) {
       const matches = data.matches || [];
       let html = `<div class="msg" style="color:var(--warn)">${esc(data.message || "Multiple matches:")}</div>`;
-      html += matches.map(m =>
-        `<div class="result-item">
-          <div class="result-content">${esc(m.content)}</div>
-          <div class="result-meta">Use more specific text to match one</div>
-        </div>`
-      ).join("");
+      html += matches.map(m => `<div class="result-item"><div class="result-content">${esc(m.content)}</div><div class="result-meta">Use more specific text to match one</div></div>`).join("");
       return html;
     }
 
     function renderTodoReopened(data) {
-      return `<div class="msg msg-success">
-        <span class="check">↩</span>
-        <span>Reopened: ${esc(data.content || "")}</span>
-      </div>`;
+      return `<div class="msg msg-success"><span class="check">↩</span><span>Reopened: ${esc(data.content || "")}</span></div>`;
     }
 
     function renderError(message) {
-      return `<div class="msg msg-error">
-        <span>✗</span>
-        <span>${esc(message)}</span>
-      </div>`;
+      return `<div class="msg msg-error"><span>✗</span><span>${esc(message)}</span></div>`;
     }
 
     const RENDERERS = {
@@ -1162,12 +982,7 @@
 
     /* ── ui helpers ──────────────────────────────────── */
 
-    function esc(text) {
-      const d = document.createElement("div");
-      d.textContent = String(text);
-      return d.innerHTML;
-    }
-
+    function esc(text) { const d = document.createElement("div"); d.textContent = String(text); return d.innerHTML; }
     function showSpinner() { document.getElementById("spinner").classList.add("active"); }
     function hideSpinner() { document.getElementById("spinner").classList.remove("active"); }
 
@@ -1205,28 +1020,14 @@
       try {
         const h = await fetchHealth();
         const llmOk = h.llm?.available;
-        const llm = llmOk ? "LLM ready" : "no LLM";
-        setStatus(true, `connected · ${llm}`);
-
-        if (!_daemonSeen) {
-          _daemonSeen = true;
-          schedulePoll(15000);
-          loadInputRecent();
-        }
-
-        if (!llmOk) {
-          showBanner("warn", "LLM model not installed", "Questions will return search results instead of synthesized answers. To enable answers, run:", "memask model download");
-        } else {
-          hideBanner();
-        }
+        setStatus(true, `connected · ${llmOk ? "LLM ready" : "no LLM"}`);
+        if (!_daemonSeen) { _daemonSeen = true; schedulePoll(15000); loadInputRecent(); }
+        if (!llmOk) { showBanner("warn", "LLM model not installed", "Questions will return search results instead of synthesized answers. To enable answers, run:", "memask model download"); }
+        else { hideBanner(); }
       } catch {
         setStatus(false, "daemon offline");
         showBanner("err", "Daemon is not running", "Start the daemon to use Memory:", "memask serve");
-
-        if (_daemonSeen) {
-          _daemonSeen = false;
-          schedulePoll(3000);
-        }
+        if (_daemonSeen) { _daemonSeen = false; schedulePoll(3000); }
       }
     }
 
@@ -1236,17 +1037,10 @@
 
     function showBanner(level, title, detail, cmd) {
       if (bannerDismissed === `${level}:${cmd}`) return;
-
       const el = document.getElementById("setup-banner");
       el.className = `active ${level}`;
-      el.innerHTML = `<button class="banner-dismiss" title="Dismiss">×</button>` +
-        `<div class="banner-title">${esc(title)}</div>` +
-        `<div>${esc(detail)} <span class="banner-cmd">${esc(cmd)}</span></div>`;
-
-      el.querySelector(".banner-dismiss").addEventListener("click", () => {
-        bannerDismissed = `${level}:${cmd}`;
-        hideBanner();
-      });
+      el.innerHTML = `<button class="banner-dismiss" title="Dismiss">×</button><div class="banner-title">${esc(title)}</div><div>${esc(detail)} <span class="banner-cmd">${esc(cmd)}</span></div>`;
+      el.querySelector(".banner-dismiss").addEventListener("click", () => { bannerDismissed = `${level}:${cmd}`; hideBanner(); });
     }
 
     function hideBanner() {
@@ -1261,7 +1055,6 @@
     let suggestIndex = -1;
     let suggestItems = [];
     let suggestDebounce = null;
-
     let editItemId = null;
     let editItemType = null;
 
@@ -1277,27 +1070,13 @@
       const dropdown = document.getElementById("suggest-dropdown");
       suggestItems = suggestions;
       suggestIndex = -1;
-
-      if (suggestions.length === 0) {
-        closeSuggest();
-        return;
-      }
-
+      if (suggestions.length === 0) { closeSuggest(); return; }
       dropdown.innerHTML = suggestions.map((s, i) => {
         const kindClass = s.kind === "command" ? "command" : "";
-        const desc = s.description
-          ? `<span class="suggest-desc">${esc(s.description)}</span>`
-          : "";
-        const badge = s.item_type
-          ? `<span class="suggest-type-badge">${esc(s.item_type)}</span>`
-          : "";
-        return `<div class="suggest-item" data-index="${i}">
-          <span class="suggest-kind ${kindClass}">${esc(s.kind)}</span>
-          <span class="suggest-text">${esc(s.text)}</span>
-          ${desc}${badge}
-        </div>`;
+        const desc = s.description ? `<span class="suggest-desc">${esc(s.description)}</span>` : "";
+        const badge = s.item_type ? `<span class="suggest-type-badge">${esc(s.item_type)}</span>` : "";
+        return `<div class="suggest-item" data-index="${i}"><span class="suggest-kind ${kindClass}">${esc(s.kind)}</span><span class="suggest-text">${esc(s.text)}</span>${desc}${badge}</div>`;
       }).join("");
-
       dropdown.classList.add("active");
       suggestOpen = true;
     }
@@ -1317,13 +1096,8 @@
       const input = document.getElementById("input");
       input.value = item.text;
       closeSuggest();
-
-      if (item.kind === "item" && item.id) {
-        enterEditMode(item.id, item.item_type);
-      } else {
-        input.focus();
-        input.setSelectionRange(input.value.length, input.value.length);
-      }
+      if (item.kind === "item" && item.id) { enterEditMode(item.id, item.item_type); }
+      else { input.focus(); input.setSelectionRange(input.value.length, input.value.length); }
     }
 
     function enterEditMode(itemId, itemType) {
@@ -1353,9 +1127,7 @@
     function navigateSuggest(direction) {
       if (!suggestOpen || suggestItems.length === 0) return;
       const items = document.querySelectorAll(".suggest-item");
-      if (suggestIndex >= 0 && suggestIndex < items.length) {
-        items[suggestIndex].classList.remove("selected");
-      }
+      if (suggestIndex >= 0 && suggestIndex < items.length) items[suggestIndex].classList.remove("selected");
       suggestIndex += direction;
       if (suggestIndex < 0) suggestIndex = suggestItems.length - 1;
       if (suggestIndex >= suggestItems.length) suggestIndex = 0;
@@ -1370,22 +1142,6 @@
         const suggestions = await fetchSuggestions(query);
         renderSuggestions(suggestions);
       }, 150);
-    }
-
-    async function patchItem(itemId, fields) {
-      const resp = await fetch(`${DAEMON}/items/${itemId}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(fields),
-      });
-      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-      return resp.json();
-    }
-
-    async function deleteItem(itemId) {
-      const resp = await fetch(`${DAEMON}/items/${itemId}`, { method: "DELETE" });
-      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-      return resp.json();
     }
 
     function parseEditPrefix(text) {
@@ -1411,17 +1167,15 @@
       showSpinner();
 
       try {
-        let result;
         switch (parsed.action) {
           case "delete":
             await deleteItem(itemId);
-            result = { action: "deleted", data: {} };
             setResponse(`<div class="msg msg-success"><span class="check">✓</span><span>Deleted.</span></div>`);
             break;
           case "retype": {
             const fields = { type: parsed.type };
             if (parsed.type === "todo") fields.status = "pending";
-            const res = await patchItem(itemId, fields);
+            await patchItem(itemId, fields);
             setResponse(`<div class="msg msg-success"><span class="check">✓</span><span>Retyped to ${esc(parsed.type)}.</span></div>`);
             break;
           }
@@ -1446,12 +1200,8 @@
     }
 
     async function copyToClipboard(text) {
-      try {
-        await navigator.clipboard.writeText(text);
-        setResponse(`<div class="msg hint">Copied to clipboard.</div>`);
-      } catch {
-        setResponse(renderError("Failed to copy."));
-      }
+      try { await navigator.clipboard.writeText(text); setResponse(`<div class="msg hint">Copied to clipboard.</div>`); }
+      catch { setResponse(renderError("Failed to copy.")); }
     }
 
     /* ── event handling ─────────────────────────────── */
@@ -1461,10 +1211,7 @@
       const text = input.value.trim();
       if (!text) return;
 
-      if (editItemId) {
-        await handleEditAction();
-        return;
-      }
+      if (editItemId) { await handleEditAction(); return; }
 
       input.value = "";
       closeSuggest();
@@ -1477,9 +1224,7 @@
         loadInputRecent();
       } catch (err) {
         const isDaemonDown = err.message.includes("fetch") || err.message.includes("network");
-        const msg = isDaemonDown
-          ? "Cannot reach daemon at " + DAEMON + ". Is it running?"
-          : err.message;
+        const msg = isDaemonDown ? "Cannot reach daemon at " + DAEMON + ". Is it running?" : err.message;
         setResponse(renderError(msg));
       } finally {
         hideSpinner();
@@ -1487,23 +1232,15 @@
     }
 
     async function hideWindow() {
-      try {
-        const { getCurrentWindow } = window.__TAURI__.window;
-        await getCurrentWindow().hide();
-      } catch (err) {
-        console.error("hideWindow failed:", err);
-      }
+      try { const { getCurrentWindow } = window.__TAURI__.window; await getCurrentWindow().hide(); }
+      catch (err) { console.error("hideWindow failed:", err); }
     }
 
     function handleKeydown(e) {
       if (e.key === "Tab") {
         e.preventDefault();
-        if (suggestOpen) {
-          closeSuggest();
-        } else {
-          const query = document.getElementById("input").value;
-          fetchSuggestions(query).then(renderSuggestions);
-        }
+        if (suggestOpen) { closeSuggest(); }
+        else { fetchSuggestions(document.getElementById("input").value).then(renderSuggestions); }
         return;
       }
 
@@ -1522,31 +1259,14 @@
       }
 
       if (editItemId) {
-        if (e.key === "Enter" && e.shiftKey) {
-          e.preventDefault();
-          const text = document.getElementById("input").value;
-          copyToClipboard(text);
-          exitEditMode();
-          return;
-        }
-        if (e.key === "Enter") {
-          e.preventDefault();
-          handleEditAction();
-          return;
-        }
+        if (e.key === "Enter" && e.shiftKey) { e.preventDefault(); copyToClipboard(document.getElementById("input").value); exitEditMode(); return; }
+        if (e.key === "Enter") { e.preventDefault(); handleEditAction(); return; }
         if (e.key === "ArrowLeft") {
           const input = document.getElementById("input");
-          if (input.selectionStart === 0 && input.selectionEnd === 0) {
-            e.preventDefault();
-            input.setSelectionRange(0, 0);
-          }
+          if (input.selectionStart === 0 && input.selectionEnd === 0) { e.preventDefault(); input.setSelectionRange(0, 0); }
           return;
         }
-        if (e.key === "Escape") {
-          e.preventDefault();
-          exitEditMode();
-          return;
-        }
+        if (e.key === "Escape") { e.preventDefault(); exitEditMode(); return; }
         return;
       }
 
@@ -1560,19 +1280,14 @@
       applyTheme(savedTheme());
 
       document.getElementById("input").addEventListener("keydown", handleKeydown);
-
-      document.getElementById("input").addEventListener("input", () => {
-        if (suggestOpen) liveSuggestFilter();
-      });
+      document.getElementById("input").addEventListener("input", () => { if (suggestOpen) liveSuggestFilter(); });
 
       document.getElementById("suggest-dropdown").addEventListener("click", (e) => {
         const item = e.target.closest(".suggest-item");
         if (item) selectSuggestion(parseInt(item.dataset.index, 10));
       });
 
-      document.addEventListener("click", (e) => {
-        if (suggestOpen && !e.target.closest("#input-row")) closeSuggest();
-      });
+      document.addEventListener("click", (e) => { if (suggestOpen && !e.target.closest("#input-row")) closeSuggest(); });
 
       document.querySelectorAll(".tab").forEach(tab => {
         tab.addEventListener("click", () => switchView(tab.dataset.view));
@@ -1589,9 +1304,11 @@
       document.getElementById("input-recent").addEventListener("click", (e) => {
         const row = e.target.closest(".input-recent-row");
         if (!row) return;
-        const input = document.getElementById("input");
-        input.value = row.dataset.content;
-        enterEditMode(row.dataset.id, row.dataset.type);
+
+        if (e.target.closest(".input-recent-type")) { toggleItemType(row); return; }
+        if (e.target.closest(".ir-done") || e.target.closest(".ir-undone")) { toggleItemStatus(row); return; }
+        if (e.target.closest(".ir-delete")) { deleteItemFromRecent(row); return; }
+        if (e.target.closest(".ir-edit") || e.target.closest(".input-recent-text")) { editItemFromRecent(row); return; }
       });
 
       document.getElementById("theme-switcher").addEventListener("click", (e) => {
@@ -1599,20 +1316,14 @@
         if (btn) setTheme(btn.dataset.theme);
       });
 
-      window.matchMedia("(prefers-color-scheme: light)").addEventListener("change", () => {
-        if (savedTheme() === "auto") applyTheme("auto");
-      });
+      window.matchMedia("(prefers-color-scheme: light)").addEventListener("change", () => { if (savedTheme() === "auto") applyTheme("auto"); });
 
       document.addEventListener("keydown", (e) => {
         if (e.key === "Escape") { e.preventDefault(); hideWindow(); }
-
         if (e.metaKey || e.ctrlKey) {
           const tabMap = { "1": "input", "2": "todos", "3": "recent", "4": "settings" };
           const view = tabMap[e.key];
-          if (view) {
-            e.preventDefault();
-            switchView(view);
-          }
+          if (view) { e.preventDefault(); switchView(view); }
         }
       });
 

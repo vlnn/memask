@@ -152,3 +152,149 @@ Tasks:
 - Event sourcing
 - Encrypted storage
 - Remote/cloud LLM backend option (API key based, for users who prefer it over local)
+
+
+## Phase 8: NL item management
+
+**Goal:** users can complete, delete, and update items using natural language — no slash commands required. Also fixes minor routing gaps (todo-list NL, help NL, multi-todo).
+
+### Phase 8a: routing & rules expansion
+
+**1. New intents**
+
+Add `TODO_DELETE` and `TODO_UPDATE` to the `Intent` enum.
+
+**2. NL rules for completion**
+
+Add patterns to `rules.py`: "X is done", "finished X", "I completed X", "mark X as done", "X is complete". Route to `TODO_COMPLETE` with `MEDIUM` confidence. The downstream matching (`_find_todos`) already works — the gap is purely routing.
+
+Test with parametrized cases: `"my task about jumping 12 times is complete"`, `"finished buying groceries"`, `"I already bought the milk"`.
+
+**3. NL rules for deletion**
+
+Add patterns: "remove X from my todos", "delete the todo about X", "cancel the X todo". Route to `TODO_DELETE` with `MEDIUM` confidence.
+
+**4. NL rules for todo listing**
+
+Patterns that currently fall to `SEARCH` but should hit `TODO_LIST`: "what's on my todo list?", "show my todos", "any pending tasks?", "what do I need to do?". Add as `MEDIUM` confidence rules.
+
+**5. NL rules for help**
+
+Patterns: "what can you do", "help me", "how does this work". Route to `APP_COMMAND` with command=`help`.
+
+**6. Embedding exemplars for new intents**
+
+Add `TODO_DELETE` and `TODO_UPDATE` exemplar lists to `INTENT_EXEMPLARS`. Deletion: "remove buy milk from my list", "delete the deployment task", "cancel the dentist reminder". Update: "change the meeting todo to next thursday", "update the buy milk task to buy oat milk", "reschedule the dentist to friday".
+
+**7. Dispatcher handlers**
+
+`_handle_todo_delete`: same shape as `_handle_todo_complete` — extract search text, `_find_todos`, single match → `soft_delete_item`, multiple → ambiguous, zero → not found.
+
+`_handle_todo_list` and `_handle_help` NL paths: wire through to existing handlers via routing. No new handler code.
+
+**8. Multi-todo splitting**
+
+When `_handle_todo_create` receives input with comma/and-separated items ("todos: buy milk, and jump 12 times"), split into individual todos. Heuristic: if the extracted content contains `, and ` or a comma-separated list, split and create each. Return `todo_created_batch` action.
+
+Test: `"todos: buy milk, jump 12 times, call mom"` → 3 items.
+
+**Done when:** `dispatch(svc, "finished buying groceries")` routes to `TODO_COMPLETE` and completes the match. `dispatch(svc, "remove the milk task")` soft-deletes it. `dispatch(svc, "what's on my todo list?")` lists pending todos. `dispatch(svc, "what can you do?")` returns help. Multi-todo input creates multiple items. All existing tests pass.
+
+
+### Phase 8b: LLM-powered action resolution
+
+**1. Action resolution prompt**
+
+New module `memask/router/action_resolution.py` with `resolve_update(text, candidates, llm) -> ActionPlan | None`. Prompt gives the LLM the input and candidate items, asks for JSON: `{"target_id": "...", "new_content": "..."}`. Prompts live in the prompts module.
+
+Test with `FakeLLM` returning canned JSON.
+
+**2. Wire into dispatcher**
+
+`_handle_todo_update`: find candidates via `_find_todos` (or all pending todos). Single unambiguous match with simple content change → apply directly. Ambiguous or complex → call `resolve_update`. LLM unavailable → return candidate list for manual disambiguation.
+
+**3. Embedding-based completion matching**
+
+Currently `_find_todos` does substring matching. Add a secondary pass: if no substring match and embedder is available, compute similarity between input and each pending todo, pick best above threshold. This makes "I purchased the milk" complete "buy milk" despite zero substring overlap.
+
+Test: todo "buy milk" completed by `"I purchased the milk"`.
+
+**4. Degradation**
+
+Every LLM-dependent path has a fallback: `resolve_update` without LLM → return ambiguous with candidate list. Embedding match for completion → falls back to substring. Multi-candidate update → return candidates with IDs.
+
+**Done when:** `dispatch(svc, "change the meeting todo to next week")` updates the right item. `dispatch(svc, "I purchased the milk")` completes "buy milk" via embedding similarity. Without LLM, these degrade to candidate lists. All existing tests pass.
+
+
+## Phase 9: Instructions & LLM categorization
+
+**Goal:** persistent user instructions via explicit `/instruction` command. All captured items get LLM-based categorization as a background enrichment step.
+
+### Phase 9a: Instruction system (command-only)
+
+**1. `/instruction` command routing**
+
+No `INSTRUCTION` intent. Instructions are created exclusively via `/instruction <text>` — routed through the existing `APP_SLASH` pattern as `APP_COMMAND`. The `_handle_app_command` dispatch table gets a new `"instruction"` entry. NL phrases like "from now on..." are deliberately NOT intercepted — they fall to `CAPTURE` as notes. This keeps instruction creation explicit and avoids accidental rules.
+
+**2. Storage: `instructions` table**
+
+Schema: `id TEXT PRIMARY KEY, content TEXT NOT NULL, active INTEGER DEFAULT 1, created_at TEXT, updated_at TEXT`. New numbered migration. Repository module: `memask/repository/instructions.py` with `create_instruction`, `list_active_instructions`, `deactivate_instruction`.
+
+**3. Dispatcher handler**
+
+`/instruction <text>` → `create_instruction(conn, text)` → return `instruction_saved` action. `/instruction` bare → list active instructions. `/instruction clear` → deactivate all. `/instruction remove <id>` → deactivate one.
+
+**4. Instruction injection into RAG**
+
+Modify the answer generation prompt in the RAG pipeline to prepend active instructions as a "user preferences" block in the system message. Only affects LLM-generated responses — non-LLM formatters (todo lists, search results, help) are unaffected.
+
+**5. HTTP endpoints**
+
+`GET /instructions` → list active. `DELETE /instructions/:id` → deactivate. Follows the existing `/items` CRUD pattern.
+
+**Done when:** `/instruction show todos with emojis` stores a rule. `/instruction` lists it. RAG answers include active instructions in their system prompt. `/instruction clear` wipes all. Tests cover CRUD, injection, deactivation.
+
+
+### Phase 9b: LLM background categorization
+
+**Goal:** every captured item gets LLM-based categorization as a final enrichment stage after embedding, so items have proper `type`, `category`, and `tags` without the user specifying them.
+
+**1. New job type: `categorize`**
+
+Add `"categorize"` to `WORKER_JOB_TYPES` in `worker.py`. Enqueued automatically alongside `embed` at capture time. Payload carries `item_id`.
+
+**2. Categorization prompt**
+
+New module `memask/enrichment/categorize.py` with `categorize_item(item, llm) -> CategoryResult`. Prompt gives the LLM the item content, asks for JSON: `{"type": "note|todo|url|decision|guide", "category": "...", "tags": ["...", "..."]}`. Type reclassification is the key win — the router's initial classification is fast-and-rough (rules + embedding), the LLM gets the final word. Prompts in the prompts module.
+
+Keep the prompt tight: LLM must pick from `VALID_TYPES`, categories should be short single-word or two-word labels, tags are free-form but max 5.
+
+**3. Worker dispatch**
+
+`_dispatch` in `worker.py` gets a `categorize` branch. Loads item from SQLite, calls `categorize_item`, then `update_item` with extracted fields. Worker needs LLM access — modify `start_background_worker` and `_worker_loop` to accept an `llm` parameter. Daemon passes `svc.llm` at startup.
+
+**4. Enqueue at capture time**
+
+In `_handle_capture` (and `_handle_todo_create`), after `create_item`, enqueue both `embed` and `categorize` jobs. Worker processes them in order; `categorize` tolerates the item not being embedded yet.
+
+**5. LLM availability check**
+
+If `llm` is `None` or `not llm.is_available()`, the categorize job is a no-op (mark complete immediately, item keeps its router-assigned type). Matches the architecture's "every LLM feature has a non-LLM fallback" principle.
+
+**6. Re-categorization on content update**
+
+When `_handle_todo_update` changes an item's content, enqueue a new `categorize` job so type/category/tags stay in sync.
+
+**7. Retroactive categorization**
+
+CLI command: `memask categorize --all` enqueues `categorize` jobs for all items without LLM-assigned categories. Marker: add a `categorized_at` column to `items` (nullable), set by the categorize worker. Command queries `WHERE categorized_at IS NULL`.
+
+**Done when:** capturing `"the stripe webhook event that caused our refund bug"` creates an item typed as `note` by the router, then the background worker recategorizes it (e.g., category `"debugging"`, tags `["stripe", "webhook", "refund"]`). Without LLM, items keep router-assigned type. `memask categorize --all` backfills existing items. All existing tests pass.
+
+
+## Implementation order
+
+1. **8a** — biggest user-facing impact, zero dependencies, pure rules + wiring.
+2. **9a** — self-contained, small surface area, no Phase 8 dependency.
+3. **9b** — new job type, new prompt, first background-path LLM usage.
+4. **8b** — highest complexity, needs intents from 8a and LLM infrastructure that 9b stress-tests.
