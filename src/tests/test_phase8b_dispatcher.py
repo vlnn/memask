@@ -9,10 +9,9 @@ from memask.repository.items import create_item, get_item, list_items, update_it
 from memask.router.dispatcher import (
     DispatchResult,
     dispatch,
-    _find_todos,
-    _find_todos_semantic,
-    _extract_update_parts,
 )
+from memask.router.todo_matching import find_todos, find_todos_semantic
+from memask.router.text_extraction import extract_update_parts
 from tests.helpers import FakeEmbeddingService, FakeLLM
 
 
@@ -23,7 +22,7 @@ class TestExtractUpdateParts:
         ("change dentist to friday", "dentist", "friday"),
     ])
     def test_extracts_search_and_new_content(self, text, search, new_content):
-        s, n = _extract_update_parts(text)
+        s, n = extract_update_parts(text)
         assert s is not None, f"should extract search text from '{text}'"
         assert n is not None, f"should extract new content from '{text}'"
 
@@ -32,13 +31,13 @@ class TestExtractUpdateParts:
         "update buy milk to buy oat milk",
     ])
     def test_search_part_is_nonempty(self, text):
-        s, _ = _extract_update_parts(text)
+        s, _ = extract_update_parts(text)
         assert s and len(s.strip()) > 0, (
             f"search part should be nonempty for '{text}'"
         )
 
     def test_fallback_returns_full_text(self):
-        s, n = _extract_update_parts("something unparseable here")
+        s, n = extract_update_parts("something unparseable here")
         assert s is not None, "should return fallback search text"
         assert n is None, "should return None for new_content on fallback"
 
@@ -196,7 +195,7 @@ class TestFindTodosSemantic:
             _make_item(id="b", content="call dentist"),
         ]
 
-        matches = _find_todos_semantic("I purchased the milk", todos, embedder, threshold=0.5)
+        matches = find_todos_semantic("I purchased the milk", todos, embedder, threshold=0.5)
         assert len(matches) == 1, "should find one semantic match"
         assert matches[0].id == "a", "should match 'buy milk'"
 
@@ -204,12 +203,12 @@ class TestFindTodosSemantic:
         embedder = FakeEmbeddingService()
         todos = [_make_item(id="a", content="buy milk")]
 
-        matches = _find_todos_semantic("completely unrelated xyz", todos, embedder, threshold=0.99)
+        matches = find_todos_semantic("completely unrelated xyz", todos, embedder, threshold=0.99)
         assert len(matches) == 0, "should return empty when below threshold"
 
     def test_returns_empty_with_no_todos(self):
         embedder = FakeEmbeddingService()
-        matches = _find_todos_semantic("anything", [], embedder)
+        matches = find_todos_semantic("anything", [], embedder)
         assert matches == [], "should return empty for empty todo list"
 
 

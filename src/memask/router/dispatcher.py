@@ -1,21 +1,36 @@
-from datetime import UTC
-import re
 from dataclasses import dataclass, field
+from datetime import UTC
 from typing import Any
-
-import numpy as np
 
 from memask.context import ServiceContext
 from memask.models.item import Item
 from memask.rag.pipeline import answer_question
-from memask.repository.items import create_item, list_items, update_item, soft_delete_item
+from memask.repository.items import (
+    create_item,
+    list_items,
+    soft_delete_item,
+    update_item,
+)
 from memask.router.action_resolution import resolve_update
-from memask.router.intents import Intent
 from memask.router.instruction_handler import handle_instruction_command
+from memask.router.intents import Intent
 from memask.router.query_refinement import needs_refinement, refine_search_query
 from memask.router.router import route
+from memask.router.text_extraction import (
+    extract_command_name,
+    extract_complete_query,
+    extract_delete_query,
+    extract_list_type,
+    extract_todo_content,
+    extract_undone_query,
+    extract_update_parts,
+    is_nl_help,
+    split_multi_todo,
+    synthesis_question,
+)
+from memask.router.todo_matching import find_todos, find_todos_semantic
 from memask.search.hybrid import hybrid_search
-from memask.search.keyword import keyword_search, SearchResult
+from memask.search.keyword import keyword_search
 
 
 @dataclass(frozen=True)
@@ -28,12 +43,9 @@ class DispatchResult:
     def to_dict(self) -> dict[str, Any]:
         result = {"action": self.action, "data": self.data}
         if self.item:
-            result["item"] = {
-                "id": self.item.id,
-                "type": self.item.type,
-                "content": self.item.content,
-                "status": self.item.status,
-            }
+            result["item"] = self.item.to_summary()
+            result["item"]["type"] = self.item.type
+            result["item"]["status"] = self.item.status
         return result
 
 
@@ -59,7 +71,7 @@ def _handle_capture(svc, text, routing):
     item = create_item(svc.conn, text.strip())
     return DispatchResult(
         action="captured",
-        data={"id": item.id, "content": item.content},
+        data=item.to_summary(),
         item=item,
     )
 
@@ -86,24 +98,19 @@ def _handle_search(svc, text, routing):
     ctx = routing.query_context
     search_query = _effective_query(svc, ctx.raw_query)
 
-    if not search_query:
+    if not search_query or not search_query.strip():
         if ctx.date_range:
-            return _handle_date_list(svc, ctx)
+            return _build_item_listing(svc, ctx)
         return DispatchResult(action="searched", data={"results": []})
 
-    if not search_query.strip() and ctx.date_range:
-        return _handle_date_list(svc, ctx)
-
     results = _retrieve(svc, search_query, ctx)
-
-    synthesis_query = _synthesis_question(text)
 
     session_history = None
     if svc.session is not None:
         session_history = svc.session.history()
 
     answer = answer_question(
-        synthesis_query,
+        synthesis_question(text),
         results,
         llm=svc.llm,
         reranker=svc.reranker,
@@ -113,7 +120,7 @@ def _handle_search(svc, text, routing):
 
     if answer.synthesized:
         if svc.session is not None:
-            svc.session.add_exchange(synthesis_query, answer.answer)
+            svc.session.add_exchange(synthesis_question(text), answer.answer)
 
         return DispatchResult(
             action="answered",
@@ -135,28 +142,24 @@ def _handle_search(svc, text, routing):
 
 
 def _handle_todo_create(svc, text, routing):
-    content = _extract_todo_content(text) or text.strip()
-    parts = _split_multi_todo(content)
+    content = extract_todo_content(text) or text.strip()
+    parts = split_multi_todo(content)
 
     if len(parts) > 1:
-        items = []
-        for part in parts:
-            item = create_item(svc.conn, part, type="todo", status="pending")
-            items.append(item)
+        items = [
+            create_item(svc.conn, part, type="todo", status="pending")
+            for part in parts
+        ]
         return DispatchResult(
             action="todo_created_batch",
-            data={
-                "items": [
-                    {"id": i.id, "content": i.content} for i in items
-                ],
-            },
+            data={"items": [i.to_summary() for i in items]},
             items=items,
         )
 
     item = create_item(svc.conn, content, type="todo", status="pending")
     return DispatchResult(
         action="todo_created",
-        data={"id": item.id, "content": item.content},
+        data=item.to_summary(),
         item=item,
     )
 
@@ -175,7 +178,7 @@ def _handle_todo_list(svc, text, routing):
 
 
 def _handle_todo_complete(svc, text, routing):
-    search_text = _extract_complete_query(text)
+    search_text = extract_complete_query(text)
 
     if not search_text and svc.embedder is None:
         return DispatchResult(
@@ -186,11 +189,11 @@ def _handle_todo_complete(svc, text, routing):
     todos = list_items(svc.conn, type="todo", status="pending")
 
     if search_text:
-        matches = _find_todos(search_text, todos)
+        matches = find_todos(search_text, todos)
         if len(matches) == 0 and svc.embedder is not None:
-            matches = _find_todos_semantic(search_text, todos, svc.embedder)
+            matches = find_todos_semantic(search_text, todos, svc.embedder)
     elif svc.embedder is not None:
-        matches = _find_todos_semantic(text.strip(), todos, svc.embedder)
+        matches = find_todos_semantic(text.strip(), todos, svc.embedder)
     else:
         matches = []
 
@@ -201,24 +204,15 @@ def _handle_todo_complete(svc, text, routing):
         updated = update_item(svc.conn, matches[0].id, status="done")
         return DispatchResult(
             action="todo_completed",
-            data={"id": updated.id, "content": updated.content},
+            data=updated.to_summary(),
             item=updated,
         )
 
-    return DispatchResult(
-        action="todo_ambiguous",
-        data={
-            "message": f"Multiple todos match '{search_text}':",
-            "matches": [
-                {"id": t.id, "content": t.content} for t in matches
-            ],
-        },
-        items=list(matches),
-    )
+    return _ambiguous_todo(search_text, matches)
 
 
 def _handle_todo_delete(svc, text, routing):
-    search_text = _extract_delete_query(text)
+    search_text = extract_delete_query(text)
     if not search_text:
         return DispatchResult(
             action="todo_not_found",
@@ -226,7 +220,7 @@ def _handle_todo_delete(svc, text, routing):
         )
 
     todos = list_items(svc.conn, type="todo", status="pending")
-    matches = _find_todos(search_text, todos)
+    matches = find_todos(search_text, todos)
 
     if len(matches) == 0:
         return DispatchResult(action="todo_not_found")
@@ -235,35 +229,26 @@ def _handle_todo_delete(svc, text, routing):
         soft_delete_item(svc.conn, matches[0].id)
         return DispatchResult(
             action="todo_deleted",
-            data={"id": matches[0].id, "content": matches[0].content},
+            data=matches[0].to_summary(),
         )
 
-    return DispatchResult(
-        action="todo_ambiguous",
-        data={
-            "message": f"Multiple todos match '{search_text}':",
-            "matches": [
-                {"id": t.id, "content": t.content} for t in matches
-            ],
-        },
-        items=list(matches),
-    )
+    return _ambiguous_todo(search_text, matches)
 
 
 def _handle_todo_update(svc, text, routing):
-    search_text, new_content = _extract_update_parts(text)
+    search_text, new_content = extract_update_parts(text)
 
     todos = list_items(svc.conn, type="todo", status="pending")
     if not todos:
         return DispatchResult(action="todo_not_found")
 
-    matches = _find_todos(search_text, todos) if search_text else []
+    matches = find_todos(search_text, todos) if search_text else []
 
     if len(matches) == 1 and new_content:
         updated = update_item(svc.conn, matches[0].id, content=new_content)
         return DispatchResult(
             action="todo_updated",
-            data={"id": updated.id, "content": updated.content},
+            data=updated.to_summary(),
             item=updated,
         )
 
@@ -278,30 +263,40 @@ def _handle_todo_update(svc, text, routing):
             updated = update_item(svc.conn, plan.target_id, content=plan.new_content)
             return DispatchResult(
                 action="todo_updated",
-                data={"id": updated.id, "content": updated.content},
+                data=updated.to_summary(),
                 item=updated,
             )
 
     if matches:
-        return DispatchResult(
-            action="todo_ambiguous",
-            data={
-                "message": f"Multiple todos match '{search_text}':",
-                "matches": [{"id": t.id, "content": t.content} for t in matches],
-            },
-            items=list(matches),
-        )
+        return _ambiguous_todo(search_text, matches)
 
     return DispatchResult(action="todo_not_found")
 
 
+def _ambiguous_todo(search_text, matches):
+    return DispatchResult(
+        action="todo_ambiguous",
+        data={
+            "message": f"Multiple todos match '{search_text}':",
+            "matches": [t.to_summary() for t in matches],
+        },
+        items=list(matches),
+    )
+
+
 def _handle_app_command(svc, text, routing):
-    command = _extract_command_name(text)
+    command = extract_command_name(text)
 
     command_handlers = {
-        "list": lambda: _handle_list(svc, text, routing),
-        "notes": lambda: _handle_list_shortcut(svc, "note", routing),
-        "todos": lambda: _handle_list_shortcut(svc, "todo", routing),
+        "list": lambda: _build_item_listing(
+            svc, routing.query_context, type_override=extract_list_type(text),
+        ),
+        "notes": lambda: _build_item_listing(
+            svc, routing.query_context, type_override="note",
+        ),
+        "todos": lambda: _build_item_listing(
+            svc, routing.query_context, type_override="todo",
+        ),
         "done": lambda: _handle_done_bare(svc),
         "undone": lambda: _handle_undone(svc, text),
         "help": lambda: _handle_help(),
@@ -313,7 +308,7 @@ def _handle_app_command(svc, text, routing):
     if handler:
         return handler()
 
-    if _is_nl_help(text):
+    if is_nl_help(text):
         return _handle_help()
 
     return DispatchResult(
@@ -322,46 +317,20 @@ def _handle_app_command(svc, text, routing):
     )
 
 
-def _handle_list(svc, text, routing):
-    type_filter = _extract_list_type(text)
-    date_from, date_to = _date_filter(routing.query_context)
+def _build_item_listing(svc, ctx, *, type_override=None):
+    date_from, date_to = _date_filter(ctx)
+    type_filter = type_override or ctx.type_filter
     all_items = list_items(
-        svc.conn, type=type_filter, date_from=date_from, date_to=date_to, limit=50,
+        svc.conn,
+        type=type_filter,
+        status=ctx.status_filter if not type_override else None,
+        date_from=date_from,
+        date_to=date_to,
+        limit=50,
     )
-    data = {
-        "items": [
-            {
-                "id": i.id,
-                "content": i.content,
-                "type": i.type,
-                "status": i.status,
-                "created_at": i.created_at,
-            }
-            for i in all_items
-        ],
-    }
-    if routing.query_context.date_range:
-        data["date_range"] = routing.query_context.date_range.label
-    return DispatchResult(action="listed", data=data, items=list(all_items))
-
-
-def _handle_list_shortcut(svc, type_filter, routing):
-    date_from, date_to = _date_filter(routing.query_context)
-    all_items = list_items(
-        svc.conn, type=type_filter, date_from=date_from, date_to=date_to, limit=50,
-    )
-    data = {
-        "items": [
-            {
-                "id": i.id,
-                "content": i.content,
-                "type": i.type,
-                "status": i.status,
-                "created_at": i.created_at,
-            }
-            for i in all_items
-        ],
-    }
+    data = {"items": [i.to_list_entry() for i in all_items]}
+    if ctx.date_range:
+        data["date_range"] = ctx.date_range.label
     return DispatchResult(action="listed", data=data, items=list(all_items))
 
 
@@ -369,24 +338,13 @@ def _handle_done_bare(svc):
     todos = list_items(svc.conn, type="todo", status="done", limit=50)
     return DispatchResult(
         action="listed",
-        data={
-            "items": [
-                {
-                    "id": i.id,
-                    "content": i.content,
-                    "type": i.type,
-                    "status": i.status,
-                    "created_at": i.created_at,
-                }
-                for i in todos
-            ],
-        },
+        data={"items": [i.to_list_entry() for i in todos]},
         items=list(todos),
     )
 
 
 def _handle_undone(svc, text):
-    search_text = _extract_undone_query(text)
+    search_text = extract_undone_query(text)
     if not search_text:
         return DispatchResult(
             action="todo_not_found",
@@ -394,7 +352,7 @@ def _handle_undone(svc, text):
         )
 
     done_todos = list_items(svc.conn, type="todo", status="done", limit=100)
-    matches = _find_todos(search_text, done_todos)
+    matches = find_todos(search_text, done_todos)
 
     if len(matches) == 0:
         return DispatchResult(
@@ -406,20 +364,11 @@ def _handle_undone(svc, text):
         updated = update_item(svc.conn, matches[0].id, status="pending")
         return DispatchResult(
             action="todo_reopened",
-            data={"id": updated.id, "content": updated.content},
+            data=updated.to_summary(),
             item=updated,
         )
 
-    return DispatchResult(
-        action="todo_ambiguous",
-        data={
-            "message": f"Multiple completed todos match '{search_text}':",
-            "matches": [
-                {"id": t.id, "content": t.content} for t in matches
-            ],
-        },
-        items=list(matches),
-    )
+    return _ambiguous_todo(search_text, matches)
 
 
 def _handle_help():
@@ -496,35 +445,6 @@ def _load_instruction_texts(svc) -> list[str]:
     return [i["content"] for i in active]
 
 
-def _handle_date_list(svc, ctx):
-    date_from, date_to = _date_filter(ctx)
-    all_items = list_items(
-        svc.conn,
-        type=ctx.type_filter,
-        status=ctx.status_filter,
-        date_from=date_from,
-        date_to=date_to,
-        limit=50,
-    )
-    return DispatchResult(
-        action="listed",
-        data={
-            "items": [
-                {
-                    "id": i.id,
-                    "content": i.content,
-                    "type": i.type,
-                    "status": i.status,
-                    "created_at": i.created_at,
-                }
-                for i in all_items
-            ],
-            "date_range": ctx.date_range.label,
-        },
-        items=list(all_items),
-    )
-
-
 def _retrieve(svc, query, ctx):
     date_from, date_to = _date_filter(ctx)
 
@@ -552,162 +472,3 @@ def _serialize_results(results):
         }
         for r in results
     ]
-
-
-def _synthesis_question(text: str) -> str:
-    stripped = text.strip()
-    if stripped.startswith("?"):
-        stripped = stripped[1:].strip()
-    return stripped
-
-
-def _extract_list_type(text: str) -> str | None:
-    m = re.match(r"^/list\s+(\w+)", text.strip(), re.I)
-    if not m:
-        return None
-    word = m.group(1).lower()
-    type_map = {"notes": "note", "note": "note", "todos": "todo", "todo": "todo"}
-    return type_map.get(word)
-
-
-def _extract_todo_content(text: str) -> str:
-    stripped = text.strip()
-
-    prefixed = re.match(r"^/todo\s+(?:add\s+)?(.+)$", stripped, re.I)
-    if prefixed:
-        return prefixed.group(1).strip()
-
-    for pattern in [
-        re.compile(r"^remind\s+me\s+(?:to\s+|about\s+)(.+)$", re.I),
-        re.compile(r"^remind\s+(?:to\s+|about\s+)(.+)$", re.I),
-        re.compile(r"^remind\s+(.+)$", re.I),
-        re.compile(r"^todos?[:\s]+(.+)$", re.I),
-        re.compile(r"^add\s+todo\s+(.+)$", re.I),
-        re.compile(
-            r"^(?:i\s+need\s+to|don'?t\s+forget\s+to|remember\s+to|i\s+have\s+to|i\s+must|i\s+should)\s+(.+)$",
-            re.I,
-        ),
-    ]:
-        match = pattern.match(stripped)
-        if match:
-            return match.group(1).strip()
-
-    return ""
-
-
-def _extract_complete_query(text: str) -> str:
-    for pattern in [
-        re.compile(r"^/todo\s+(?:done|complete)\s+(.+)$", re.I),
-        re.compile(r"^/done\s+(.+)$", re.I),
-        re.compile(r"^finished\s+(.+)$", re.I),
-        re.compile(r"^i\s+completed\s+(.+)$", re.I),
-        re.compile(r"^i\s+already\s+(.+)$", re.I),
-        re.compile(r"^mark\s+(.+?)\s+as\s+done$", re.I),
-        re.compile(r"^(?:my\s+)?task\s+(?:about\s+)?(.+?)\s+is\s+(?:done|complete)\s*$", re.I),
-        re.compile(r"^(.+?)\s+is\s+(?:done|complete)\s*$", re.I),
-    ]:
-        match = pattern.match(text.strip())
-        if match:
-            return match.group(1).strip()
-    return ""
-
-
-def _extract_delete_query(text: str) -> str:
-    for pattern in [
-        re.compile(r"^remove\s+(.+?)\s+from\s+my\s+(?:todos?|tasks?|list)", re.I),
-        re.compile(r"^delete\s+(?:the\s+)?(?:todo|task)\s+(?:about\s+)?(.+)$", re.I),
-        re.compile(r"^delete\s+(?:my\s+)?(?:todo|task)\s+(?:about\s+)?(.+)$", re.I),
-        re.compile(r"^cancel\s+the\s+(.+?)\s+(?:todo|task|reminder)$", re.I),
-        re.compile(r"^remove\s+the\s+(.+?)\s+(?:task|todo)\s+from\s+my\s+list$", re.I),
-        re.compile(r"^delete\s+(.+)$", re.I),
-        re.compile(r"^remove\s+(.+)$", re.I),
-    ]:
-        match = pattern.match(text.strip())
-        if match:
-            return match.group(1).strip()
-    return ""
-
-
-UPDATE_PATTERNS = [
-    re.compile(r"^(?:change|update)\s+(?:the\s+)?(.+?)\s+(?:todo\s+)?to\s+(.+)$", re.I),
-    re.compile(r"^reschedule\s+(?:the\s+)?(.+?)\s+to\s+(.+)$", re.I),
-    re.compile(r"^rename\s+(?:the\s+)?(.+?)\s+to\s+(.+)$", re.I),
-    re.compile(r"^set\s+(?:the\s+)?(.+?)\s+to\s+(.+)$", re.I),
-]
-
-
-def _extract_update_parts(text: str) -> tuple[str | None, str | None]:
-    stripped = text.strip()
-    for pattern in UPDATE_PATTERNS:
-        match = pattern.match(stripped)
-        if match:
-            return match.group(1).strip(), match.group(2).strip()
-    return stripped, None
-
-
-def _extract_undone_query(text: str) -> str:
-    m = re.match(r"^/undone\s+(.+)$", text.strip(), re.I)
-    return m.group(1).strip() if m else ""
-
-
-def _extract_command_name(text: str) -> str:
-    stripped = text.strip()
-    match = re.match(r"^[!/](\w+)", stripped)
-    if match:
-        return match.group(1).lower()
-    return stripped.lower()
-
-
-def _is_nl_help(text: str) -> bool:
-    return bool(re.match(
-        r"(?:what\s+can\s+you\s+do|help\s+me|how\s+does\s+this\s+work)",
-        text.strip(),
-        re.I,
-    ))
-
-
-def _find_todos(query: str, todos: list[Item]) -> list[Item]:
-    query_lower = query.lower()
-    return [t for t in todos if query_lower in t.content.lower()]
-
-
-def _find_todo(query: str, todos: list[Item]) -> Item | None:
-    matches = _find_todos(query, todos)
-    return matches[0] if len(matches) == 1 else None
-
-
-def _find_todos_semantic(
-    query: str,
-    todos: list[Item],
-    embedder,
-    threshold: float = 0.5,
-) -> list[Item]:
-    if not todos or embedder is None:
-        return []
-
-    query_vec = np.asarray(embedder.embed_one(query), dtype=np.float32)
-    todo_texts = [t.content for t in todos]
-    todo_vecs = np.asarray(embedder.embed_many(todo_texts), dtype=np.float32)
-
-    scores = _cosine_similarities(query_vec, todo_vecs)
-    best_idx = int(np.argmax(scores))
-    best_score = float(scores[best_idx])
-
-    if best_score >= threshold:
-        return [todos[best_idx]]
-    return []
-
-
-def _cosine_similarities(query_vec, candidate_vecs):
-    query_norm = query_vec / (np.linalg.norm(query_vec) + 1e-9)
-    norms = np.linalg.norm(candidate_vecs, axis=1, keepdims=True) + 1e-9
-    normalized = candidate_vecs / norms
-    return normalized @ query_norm
-
-
-def _split_multi_todo(content: str) -> list[str]:
-    normalized = re.sub(r",\s*and\s+", ", ", content)
-    if "," not in normalized:
-        return [content.strip()]
-    parts = [p.strip() for p in normalized.split(",")]
-    return [p for p in parts if p]

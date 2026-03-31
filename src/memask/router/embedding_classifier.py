@@ -69,11 +69,13 @@ INTENT_EXEMPLARS: dict[Intent, list[str]] = {
 
 SIMILARITY_THRESHOLD = 0.35
 _cached_vectors: dict[Intent, np.ndarray] | None = None
+_cached_for_service_id: int | None = None
 
 
 def reset_cache():
-    global _cached_vectors
+    global _cached_vectors, _cached_for_service_id
     _cached_vectors = None
+    _cached_for_service_id = None
 
 
 def classify_by_embedding(text: str, embedding_service) -> RoutingResult | None:
@@ -107,11 +109,14 @@ def classify_by_embedding(text: str, embedding_service) -> RoutingResult | None:
 
 
 def _get_exemplar_vectors(embedding_service) -> dict[Intent, np.ndarray]:
-    global _cached_vectors
-    if _cached_vectors is not None:
+    global _cached_vectors, _cached_for_service_id
+
+    service_id = id(embedding_service)
+    if _cached_vectors is not None and _cached_for_service_id == service_id:
         return _cached_vectors
 
     _cached_vectors = {}
     for intent, texts in INTENT_EXEMPLARS.items():
         _cached_vectors[intent] = embedding_service.embed_many(texts)
+    _cached_for_service_id = service_id
     return _cached_vectors

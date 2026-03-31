@@ -56,26 +56,14 @@ def input(ctx: click.Context, text: tuple[str, ...]) -> None:
     if client is not None:
         try:
             data = client.input(full_text)
-            _format_daemon_result(data)
+            _format_result(data.get("action", "unknown"), data.get("data", {}))
             return
         except ConnectionError as exc:
             raise click.ClickException(f"daemon not reachable: {exc}")
 
     svc = _get_svc(ctx)
     result = dispatch(svc, full_text)
-
-    formatters = {
-        "captured": _format_captured,
-        "searched": _format_searched,
-        "answered": _format_answered,
-        "todo_created": _format_todo_created,
-        "todo_listed": _format_todo_listed,
-        "todo_completed": _format_todo_completed,
-        "todo_not_found": _format_todo_not_found,
-        "app_command": _format_app_command,
-    }
-    formatter = formatters.get(result.action, _format_default)
-    formatter(result)
+    _format_result(result.action, result.data)
 
 
 @cli.command()
@@ -288,7 +276,8 @@ def model_status_cmd():
 @model.command("download")
 def model_download_cmd():
     """Download the default LLM model."""
-    from memask.rag.models import download_model, model_status as get_status
+    from memask.rag.models import download_model
+    from memask.rag.models import model_status as get_status
 
     status = get_status()
     if status["downloaded"]:
@@ -320,12 +309,35 @@ def model_path_cmd():
     click.echo(str(model_path()))
 
 
-def _format_captured(result):
-    click.echo(f"Saved: {result.data.get('content', '')}")
+def _format_result(action, data):
+    formatters = {
+        "captured": lambda d: click.echo(f"Saved: {d.get('content', '')}"),
+        "searched": _format_search_results,
+        "answered": _format_answer,
+        "todo_created": lambda d: click.echo(f"Todo: {d.get('content', '')}"),
+        "todo_created_batch": lambda d: [
+            click.echo(f"Todo: {i.get('content', '')}") for i in d.get("items", [])
+        ],
+        "todo_listed": _format_todo_list,
+        "todo_completed": lambda d: click.echo(f"Done: {d.get('content', '')}"),
+        "todo_not_found": lambda d: click.echo(
+            d.get("message", "No matching todo found.")
+        ),
+        "todo_ambiguous": _format_todo_list,
+        "app_command": lambda d: click.echo(f"Command: {d.get('command', '')}"),
+        "listed": _format_item_listing,
+        "help": _format_help,
+        "status": _format_status,
+    }
+    formatter = formatters.get(action)
+    if formatter:
+        formatter(data)
+    else:
+        click.echo(f"[{action}] OK")
 
 
-def _format_searched(result):
-    results = result.data.get("results", [])
+def _format_search_results(data):
+    results = data.get("results", [])
     if not results:
         click.echo("No results found.")
         return
@@ -336,80 +348,49 @@ def _format_searched(result):
         click.echo(f"  [{tag}] [{src} {score:.3f}] {r['id']}: {r['content']}")
 
 
-def _format_answered(result):
-    click.echo(result.data.get("answer", ""))
-    sources = result.data.get("sources", [])
+def _format_answer(data):
+    click.echo(data.get("answer", ""))
+    sources = data.get("sources", [])
     if sources:
         click.echo(f"\nSources: {', '.join(sources)}")
 
 
-def _format_todo_created(result):
-    click.echo(f"Todo: {result.data.get('content', '')}")
-
-
-def _format_todo_listed(result):
-    items_data = result.data.get("items", [])
+def _format_todo_list(data):
+    items_data = data.get("items", data.get("matches", []))
     if not items_data:
         click.echo("No pending todos.")
         return
     for todo in items_data:
-        click.echo(f"  [ ] {todo['id']}: {todo['content']}")
+        status = todo.get("status", " ")
+        mark = "x" if status == "done" else " "
+        click.echo(f"  [{mark}] {todo['id']}: {todo['content']}")
 
 
-def _format_todo_completed(result):
-    click.echo(f"Done: {result.data.get('content', '')}")
+def _format_item_listing(data):
+    items_data = data.get("items", [])
+    label = data.get("date_range")
+    if label:
+        click.echo(f"({label})")
+    if not items_data:
+        click.echo("No items found.")
+        return
+    for item in items_data:
+        prefix = f"[{item.get('type', '?')}]"
+        if item.get("status"):
+            prefix += f" ({item['status']})"
+        click.echo(f"  {prefix} {item['id']}: {item['content']}")
 
 
-def _format_todo_not_found(result):
-    click.echo("No matching todo found.")
+def _format_help(data):
+    for cmd in data.get("commands", []):
+        click.echo(f"  {cmd['command']:30s} {cmd['description']}")
 
 
-def _format_app_command(result):
-    click.echo(f"Command: {result.data.get('command', '')}")
-
-
-def _format_default(result):
-    click.echo(f"[{result.action}] OK")
-
-
-def _format_daemon_result(data):
-    action = data.get("action", "unknown")
-    inner = data.get("data", {})
-
-    if action == "captured":
-        click.echo(f"Saved: {inner.get('content', '')}")
-    elif action == "searched":
-        results = inner.get("results", [])
-        if not results:
-            click.echo("No results found.")
-            return
-        for r in results:
-            tag = r.get("type", "?")
-            src = r.get("source", "?")
-            score = r.get("score", 0)
-            click.echo(f"  [{tag}] [{src} {score:.3f}] {r['id']}: {r['content']}")
-    elif action == "answered":
-        click.echo(inner.get("answer", ""))
-        sources = inner.get("sources", [])
-        if sources:
-            click.echo(f"\nSources: {', '.join(sources)}")
-    elif action == "todo_created":
-        click.echo(f"Todo: {inner.get('content', '')}")
-    elif action == "todo_listed":
-        items_data = inner.get("items", [])
-        if not items_data:
-            click.echo("No pending todos.")
-            return
-        for item in items_data:
-            click.echo(f"  [{item.get('status', '?')}] {item['id']}: {item['content']}")
-    elif action == "todo_completed":
-        click.echo(f"Done: {inner.get('content', '')}")
-    elif action == "todo_not_found":
-        click.echo("Todo not found.")
-    elif action == "app_command":
-        click.echo(f"Command: {inner.get('command', '?')}")
-    else:
-        click.echo(f"[{action}] {inner}")
+def _format_status(data):
+    click.echo(f"LLM available: {data.get('llm', False)}")
+    click.echo(f"Embedder: {data.get('embedder', 'none')}")
+    click.echo(f"Vectors: {data.get('vectors', 0)}")
+    click.echo(f"Items: {data.get('items', 0)}")
 
 
 @cli.command("install")
@@ -436,7 +417,7 @@ def install_cmd():
 @cli.command("uninstall")
 def uninstall_cmd():
     """Remove memask daemon from login startup."""
-    from memask.autostart import uninstall, status
+    from memask.autostart import status, uninstall
 
     current = status()
     if not current["installed"]:

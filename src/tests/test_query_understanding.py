@@ -8,24 +8,6 @@ from memask.router.query_understanding import extract_query_context
 NOW = datetime(2026, 3, 30, 14, 30, 0)
 
 
-class TestDateHintExtraction:
-    @pytest.mark.parametrize("text,expected_hints", [
-        ("notes from yesterday", ["yesterday"]),
-        ("what did I write today", ["today"]),
-        ("notes from last week", ["last week"]),
-        ("stuff from this morning", ["this morning"]),
-        ("things I wrote last monday", ["last monday"]),
-        ("meeting notes from march", ["march"]),
-        ("no date here", []),
-        ("deployed yesterday and today", ["yesterday", "today"]),
-    ])
-    def test_extracts_date_hints(self, text, expected_hints):
-        ctx = extract_query_context(text)
-        assert ctx.date_hints == expected_hints, (
-            f"'{text}' should extract date hints {expected_hints}"
-        )
-
-
 class TestTopicExtraction:
     @pytest.mark.parametrize("text,expected_topic", [
         ("what did I note about deployment", "deployment"),

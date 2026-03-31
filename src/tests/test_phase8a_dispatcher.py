@@ -7,8 +7,8 @@ from memask.router.dispatcher import (
     dispatch,
     _handle_todo_create,
     _handle_todo_delete,
-    _split_multi_todo,
 )
+from memask.router.text_extraction import split_multi_todo
 from memask.router.intents import Confidence, Intent, RoutingResult
 from memask.router.query_understanding import extract_query_context
 
@@ -173,37 +173,37 @@ class TestNLCompletionEndToEnd:
 
 class TestMultiTodoSplitting:
     def test_split_comma_separated(self):
-        parts = _split_multi_todo("buy milk, jump 12 times, call mom")
+        parts = split_multi_todo("buy milk, jump 12 times, call mom")
         assert parts == ["buy milk", "jump 12 times", "call mom"], (
             "should split comma-separated items"
         )
 
     def test_split_comma_and(self):
-        parts = _split_multi_todo("buy milk, and jump 12 times")
+        parts = split_multi_todo("buy milk, and jump 12 times")
         assert parts == ["buy milk", "jump 12 times"], (
             "should split ', and ' separated items"
         )
 
     def test_no_split_for_single_item(self):
-        parts = _split_multi_todo("buy milk")
+        parts = split_multi_todo("buy milk")
         assert parts == ["buy milk"], (
             "single item should not be split"
         )
 
     def test_no_split_for_short_comma_phrase(self):
-        parts = _split_multi_todo("buy milk, eggs")
+        parts = split_multi_todo("buy milk, eggs")
         assert len(parts) == 2, (
             "comma-separated pair should split into 2 items"
         )
 
     def test_strips_whitespace(self):
-        parts = _split_multi_todo("  buy milk ,  call mom  ")
+        parts = split_multi_todo("  buy milk ,  call mom  ")
         assert parts == ["buy milk", "call mom"], (
             "should strip whitespace from split items"
         )
 
     def test_filters_empty_parts(self):
-        parts = _split_multi_todo("buy milk,,call mom")
+        parts = split_multi_todo("buy milk,,call mom")
         assert all(p for p in parts), (
             "should not include empty parts"
         )

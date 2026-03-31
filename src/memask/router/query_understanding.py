@@ -1,11 +1,15 @@
 import re
 from datetime import datetime
 
-from memask.router.date_range import DateRange, resolve as resolve_date
+from memask.router.date_range import resolve as resolve_date
 from memask.router.intents import QueryContext
 
 DATE_EXPRESSION_PATTERNS = [
-    re.compile(r"\blast\s+(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b", re.I),
+    re.compile(
+        r"\blast\s+(?:monday|tuesday|wednesday|thursday"
+        r"|friday|saturday|sunday)\b",
+        re.I,
+    ),
     re.compile(r"\b(?:this|last)\s+(?:week|month|year)\b", re.I),
     re.compile(r"[+-]\d+[dwmy]", re.I),
     re.compile(r"\b(?:today|yesterday|tomorrow)\b", re.I),
@@ -16,25 +20,6 @@ TRAILING_PREPOSITION_RE = re.compile(
     r"\b(?:from|since|for|in|on|during|until|before|after)\s*$",
     re.I,
 )
-
-DATE_HINT_PATTERNS = [
-    re.compile(r"\b(?:yesterday|today|tomorrow)\b", re.I),
-    re.compile(
-        r"\blast\s+(?:week|month|year|monday|tuesday|"
-        r"wednesday|thursday|friday|saturday|sunday)\b",
-        re.I,
-    ),
-    re.compile(
-        r"\bthis\s+(?:week|month|year|morning|afternoon|evening)\b",
-        re.I,
-    ),
-    re.compile(r"\b\d{4}-\d{2}-\d{2}\b"),
-    re.compile(
-        r"\b(?:january|february|march|april|may|june|"
-        r"july|august|september|october|november|december)\b",
-        re.I,
-    ),
-]
 
 SEARCH_PREAMBLES = [
     re.compile(
@@ -119,7 +104,6 @@ def extract_query_context(text: str, now: datetime | None = None) -> QueryContex
     topic = _extract_topic(cleaned_query)
     cleaned_query = _strip_search_preamble(cleaned_query)
     return QueryContext(
-        date_hints=_extract_date_hints(text),
         date_range=date_range,
         topic=topic,
         type_filter=_extract_type_filter(text),
@@ -163,14 +147,6 @@ def _extract_and_resolve_dates(text, now=None):
                 break
 
     return resolved, cleaned
-
-
-def _extract_date_hints(text: str) -> list[str]:
-    hints = []
-    for pattern in DATE_HINT_PATTERNS:
-        for match in pattern.finditer(text):
-            hints.append(match.group(0).lower())
-    return hints
 
 
 def _extract_topic(text: str) -> str | None:
