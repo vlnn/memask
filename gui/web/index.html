@@ -290,8 +290,7 @@
 
     .input-recent-row.done .input-recent-time { opacity: 0.5; }
 
-    .input-recent-type {
-      flex-shrink: 0;
+    .tag-badge {
       display: inline-block;
       padding: 1px 5px;
       border-radius: 3px;
@@ -299,16 +298,20 @@
       font-weight: 600;
       text-transform: uppercase;
       letter-spacing: 0.5px;
+    }
+
+    .tag-badge.note { background: var(--tag-note-bg); color: var(--tag-note-fg); }
+    .tag-badge.todo { background: var(--tag-todo-bg); color: var(--tag-todo-fg); }
+    .tag-badge.other { background: var(--tag-other-bg); color: var(--tag-other-fg); }
+
+    .input-recent-type {
+      flex-shrink: 0;
       cursor: pointer;
       transition: opacity 0.15s;
       user-select: none;
     }
 
     .input-recent-type:hover { opacity: 0.7; }
-
-    .input-recent-type.note { background: var(--tag-note-bg); color: var(--tag-note-fg); }
-    .input-recent-type.todo { background: var(--tag-todo-bg); color: var(--tag-todo-fg); }
-    .input-recent-type.other { background: var(--tag-other-bg); color: var(--tag-other-fg); }
 
     .input-recent-text {
       flex: 1;
@@ -450,14 +453,7 @@
     .recent-content { color: var(--text-strong); font-size: 14px; line-height: 1.4; }
     .recent-meta { font-size: 12px; color: var(--text-muted); margin-top: 2px; }
 
-    .recent-type {
-      display: inline-block; padding: 1px 6px; border-radius: 3px;
-      font-size: 11px; margin-right: 6px;
-    }
-
-    .recent-type.note { background: var(--tag-note-bg); color: var(--tag-note-fg); }
-    .recent-type.todo { background: var(--tag-todo-bg); color: var(--tag-todo-fg); }
-    .recent-type.other { background: var(--tag-other-bg); color: var(--tag-other-fg); }
+    .recent-type { margin-right: 6px; font-size: 11px; }
     .recent-empty { padding: 32px 16px; text-align: center; color: var(--text-faint); font-size: 14px; }
 
     /* ── settings view ──────────────────────────────── */
@@ -618,6 +614,16 @@
 
   <script>
     const DAEMON = "http://127.0.0.1:7394";
+    const $ = {};
+
+    function cacheDOM() {
+      ["input", "input-row", "input-icon", "spinner",
+       "response", "input-recent", "suggest-dropdown", "setup-banner",
+       "status-dot", "status-text", "todo-list", "todo-count",
+       "recent-list", "recent-count",
+       "input-view", "todo-view", "recent-view", "settings-view",
+      ].forEach(id => $[id] = document.getElementById(id));
+    }
 
     /* ── theme ──────────────────────────────────────── */
 
@@ -641,47 +647,29 @@
 
     /* ── daemon api ─────────────────────────────────── */
 
-    async function postInput(text) {
-      const resp = await fetch(`${DAEMON}/input`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text }),
-      });
+    async function api(path, opts) {
+      const resp = await fetch(`${DAEMON}${path}`, opts);
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
       return resp.json();
     }
 
-    async function fetchItems(type, status, limit) {
-      const params = new URLSearchParams();
-      if (type) params.set("type", type);
-      if (status) params.set("status", status);
-      if (limit) params.set("limit", String(limit));
-      const resp = await fetch(`${DAEMON}/items?${params}`);
-      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-      return resp.json();
+    function jsonOpts(method, body) {
+      return { method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) };
     }
 
-    async function fetchHealth() {
-      const resp = await fetch(`${DAEMON}/health`);
-      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-      return resp.json();
+    function postInput(text) { return api("/input", jsonOpts("POST", { text })); }
+
+    function fetchItems(type, status, limit) {
+      const p = new URLSearchParams();
+      if (type) p.set("type", type);
+      if (status) p.set("status", status);
+      if (limit) p.set("limit", String(limit));
+      return api(`/items?${p}`);
     }
 
-    async function patchItem(itemId, fields) {
-      const resp = await fetch(`${DAEMON}/items/${itemId}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(fields),
-      });
-      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-      return resp.json();
-    }
-
-    async function deleteItem(itemId) {
-      const resp = await fetch(`${DAEMON}/items/${itemId}`, { method: "DELETE" });
-      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-      return resp.json();
-    }
+    function fetchHealth() { return api("/health"); }
+    function patchItem(id, fields) { return api(`/items/${id}`, jsonOpts("PATCH", fields)); }
+    function deleteItem(id) { return api(`/items/${id}`, { method: "DELETE" }); }
 
     /* ── tab switching ──────────────────────────────── */
 
@@ -693,10 +681,10 @@
       document.querySelectorAll(".tab").forEach(t => {
         t.classList.toggle("active", t.dataset.view === view);
       });
-      document.getElementById("input-view").classList.toggle("hidden", view !== "input");
-      document.getElementById("todo-view").classList.toggle("active", view === "todos");
-      document.getElementById("recent-view").classList.toggle("active", view === "recent");
-      document.getElementById("settings-view").classList.toggle("active", view === "settings");
+      $["input-view"].classList.toggle("hidden", view !== "input");
+      $["todo-view"].classList.toggle("active", view === "todos");
+      $["recent-view"].classList.toggle("active", view === "recent");
+      $["settings-view"].classList.toggle("active", view === "settings");
 
       if (view === "input") { focusInput(); loadInputRecent(); }
       if (view === "todos") loadTodos();
@@ -706,8 +694,8 @@
     /* ── todo view ──────────────────────────────────── */
 
     async function loadTodos() {
-      const list = document.getElementById("todo-list");
-      const count = document.getElementById("todo-count");
+      const list = $["todo-list"];
+      const count = $["todo-count"];
       list.innerHTML = '<div class="todo-empty">Loading…</div>';
       count.textContent = "";
       try {
@@ -722,7 +710,7 @@
     }
 
     function renderTodoList(items) {
-      const list = document.getElementById("todo-list");
+      const list = $["todo-list"];
       if (items.length === 0) { list.innerHTML = '<div class="todo-empty">No pending todos.</div>'; return; }
       list.innerHTML = items.map(t =>
         `<div class="todo-row" data-id="${esc(t.id)}" data-content="${esc(t.content)}">
@@ -749,8 +737,8 @@
     /* ── recent view ─────────────────────────────────── */
 
     async function loadRecent() {
-      const list = document.getElementById("recent-list");
-      const count = document.getElementById("recent-count");
+      const list = $["recent-list"];
+      const count = $["recent-count"];
       list.innerHTML = '<div class="recent-empty">Loading…</div>';
       count.textContent = "";
       try {
@@ -765,15 +753,14 @@
     }
 
     function renderRecentList(items) {
-      const list = document.getElementById("recent-list");
+      const list = $["recent-list"];
       if (items.length === 0) { list.innerHTML = '<div class="recent-empty">No items yet.</div>'; return; }
       list.innerHTML = items.map(item => {
-        const typeClass = (item.type === "note" || item.type === "todo") ? item.type : "other";
         const meta = [item.type];
         if (item.status) meta.push(item.status);
-        if (item.created_at) meta.push(item.created_at.slice(0, 16).replace("T", " "));
+        if (item.created_at) meta.push(formatTs(item.created_at));
         return `<div class="recent-row">
-          <div class="recent-content"><span class="recent-type ${typeClass}">${esc(item.type)}</span>${esc(item.content)}</div>
+          <div class="recent-content"><span class="tag-badge recent-type ${typeClassFor(item)}">${esc(item.type)}</span>${esc(item.content)}</div>
           <div class="recent-meta">${esc(meta.join(" · "))}</div>
         </div>`;
       }).join("");
@@ -782,7 +769,7 @@
     /* ── input recent (default entries under input) ─── */
 
     async function loadInputRecent() {
-      const el = document.getElementById("input-recent");
+      const el = $["input-recent"];
       try {
         const data = await fetchItems(null, null, 10);
         renderInputRecent(data.items || []);
@@ -793,17 +780,15 @@
     }
 
     function renderInputRecent(items) {
-      const el = document.getElementById("input-recent");
+      const el = $["input-recent"];
       if (items.length === 0) {
         el.innerHTML = '<div style="padding:32px 16px;text-align:center;color:var(--text-faint);font-size:14px">No items yet.</div>';
         return;
       }
 
       el.innerHTML = items.map(item => {
-        const typeClass = (item.type === "note" || item.type === "todo") ? item.type : "other";
         const isDone = item.status === "done";
         const rowClass = "input-recent-row" + (isDone ? " done" : "");
-        const ts = item.created_at ? item.created_at.slice(0, 16).replace("T", " ") : "";
 
         const isTodo = item.type === "todo";
         let statusBtn = "";
@@ -814,22 +799,20 @@
         }
 
         return `<div class="${rowClass}" data-id="${esc(item.id)}" data-content="${esc(item.content)}" data-type="${esc(item.type)}" data-status="${esc(item.status || "")}">
-          <span class="input-recent-type ${typeClass}" title="Click to toggle note↔todo">${esc(item.type)}</span>
+          <span class="tag-badge input-recent-type ${typeClassFor(item)}" title="Click to toggle note↔todo">${esc(item.type)}</span>
           <span class="input-recent-text">${esc(item.content)}</span>
           <span class="input-recent-actions">
             ${statusBtn}
             <button class="ir-action ir-edit" title="Edit">✎</button>
             <button class="ir-action ir-delete" title="Delete">×</button>
           </span>
-          <span class="input-recent-time">${esc(ts)}</span>
+          <span class="input-recent-time">${esc(formatTs(item.created_at))}</span>
         </div>`;
       }).join("");
     }
 
     function syncInputRecentVisibility() {
-      const response = document.getElementById("response");
-      const recent = document.getElementById("input-recent");
-      recent.classList.toggle("hidden", response.innerHTML.trim() !== "");
+      $["input-recent"].classList.toggle("hidden", $["response"].innerHTML.trim() !== "");
     }
 
     async function toggleItemType(row) {
@@ -855,23 +838,18 @@
     }
 
     function editItemFromRecent(row) {
-      const input = document.getElementById("input");
+      const input = $["input"];
       input.value = row.dataset.content;
       enterEditMode(row.dataset.id, row.dataset.type);
     }
 
     /* ── response renderers ─────────────────────────── */
 
-    function renderCaptured(data) {
-      return `<div class="msg msg-success"><span class="check">✓</span><span>Captured: ${esc(data.content || "")}</span></div>`;
-    }
+    function typeClassFor(item) { return (item.type === "note" || item.type === "todo") ? item.type : "other"; }
+    function formatTs(ts) { return ts ? ts.slice(0, 16).replace("T", " ") : ""; }
 
-    function renderTodoCreated(data) {
-      return `<div class="msg msg-success"><span class="check">✓</span><span>Todo added: ${esc(data.content || "")}</span></div>`;
-    }
-
-    function renderTodoCompleted(data) {
-      return `<div class="msg msg-success"><span class="check">✓</span><span>Done: ${esc(data.content || "")}</span></div>`;
+    function successMsg(icon, label, data) {
+      return `<div class="msg msg-success"><span class="check">${icon}</span><span>${label}: ${esc(data.content || "")}</span></div>`;
     }
 
     function renderTodoNotFound() {
@@ -949,30 +927,30 @@
       return html;
     }
 
-    function renderTodoReopened(data) {
-      return `<div class="msg msg-success"><span class="check">↩</span><span>Reopened: ${esc(data.content || "")}</span></div>`;
-    }
-
     function renderError(message) {
       return `<div class="msg msg-error"><span>✗</span><span>${esc(message)}</span></div>`;
     }
 
     const RENDERERS = {
-      captured: renderCaptured,
-      todo_created: renderTodoCreated,
-      todo_completed: renderTodoCompleted,
+      captured:       d => successMsg("✓", "Captured", d),
+      todo_created:   d => successMsg("✓", "Todo added", d),
+      todo_completed: d => successMsg("✓", "Done", d),
+      todo_reopened:  d => successMsg("↩", "Reopened", d),
       todo_not_found: renderTodoNotFound,
-      todo_listed: renderTodoListed,
+      todo_listed:    renderTodoListed,
       todo_ambiguous: renderTodoAmbiguous,
-      todo_reopened: renderTodoReopened,
-      answered: renderAnswered,
-      searched: renderSearched,
-      listed: renderListed,
-      help: renderHelp,
-      status: renderStatus,
-      app_command: renderAppCommand,
-      error: renderServerError,
+      answered:       renderAnswered,
+      searched:       renderSearched,
+      listed:         renderListed,
+      help:           renderHelp,
+      status:         renderStatus,
+      app_command:    renderAppCommand,
+      error:          renderServerError,
     };
+
+    const TRANSIENT_ACTIONS = new Set([
+      "captured", "todo_created", "todo_completed", "todo_reopened",
+    ]);
 
     function renderResponse(result) {
       const renderer = RENDERERS[result.action];
@@ -982,30 +960,24 @@
 
     /* ── ui helpers ──────────────────────────────────── */
 
-    function esc(text) { const d = document.createElement("div"); d.textContent = String(text); return d.innerHTML; }
-    function showSpinner() { document.getElementById("spinner").classList.add("active"); }
-    function hideSpinner() { document.getElementById("spinner").classList.remove("active"); }
+    function esc(text) { return String(text).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;"); }
+    function showSpinner() { $["spinner"].classList.add("active"); }
+    function hideSpinner() { $["spinner"].classList.remove("active"); }
 
     function setResponse(html) {
-      document.getElementById("response").innerHTML = html;
+      $["response"].innerHTML = html;
       syncInputRecentVisibility();
     }
 
     function clearResponse() { setResponse(""); }
 
-    function focusInput() {
-      const el = document.getElementById("input");
-      el.focus();
-      el.select();
-    }
+    function focusInput() { $["input"].focus(); $["input"].select(); }
 
     /* ── status polling ─────────────────────────────── */
 
     function setStatus(ok, text) {
-      const dot = document.getElementById("status-dot");
-      const label = document.getElementById("status-text");
-      dot.className = ok ? "ok" : "err";
-      label.textContent = text;
+      $["status-dot"].className = ok ? "ok" : "err";
+      $["status-text"].textContent = text;
     }
 
     let _healthTimer = null;
@@ -1037,16 +1009,15 @@
 
     function showBanner(level, title, detail, cmd) {
       if (bannerDismissed === `${level}:${cmd}`) return;
-      const el = document.getElementById("setup-banner");
+      const el = $["setup-banner"];
       el.className = `active ${level}`;
       el.innerHTML = `<button class="banner-dismiss" title="Dismiss">×</button><div class="banner-title">${esc(title)}</div><div>${esc(detail)} <span class="banner-cmd">${esc(cmd)}</span></div>`;
       el.querySelector(".banner-dismiss").addEventListener("click", () => { bannerDismissed = `${level}:${cmd}`; hideBanner(); });
     }
 
     function hideBanner() {
-      const el = document.getElementById("setup-banner");
-      el.className = "";
-      el.innerHTML = "";
+      $["setup-banner"].className = "";
+      $["setup-banner"].innerHTML = "";
     }
 
     /* ── suggest dropdown ─────────────────────────────── */
@@ -1067,7 +1038,7 @@
     }
 
     function renderSuggestions(suggestions) {
-      const dropdown = document.getElementById("suggest-dropdown");
+      const dropdown = $["suggest-dropdown"];
       suggestItems = suggestions;
       suggestIndex = -1;
       if (suggestions.length === 0) { closeSuggest(); return; }
@@ -1082,7 +1053,7 @@
     }
 
     function closeSuggest() {
-      const dropdown = document.getElementById("suggest-dropdown");
+      const dropdown = $["suggest-dropdown"];
       dropdown.classList.remove("active");
       dropdown.innerHTML = "";
       suggestOpen = false;
@@ -1093,7 +1064,7 @@
     function selectSuggestion(index) {
       if (index < 0 || index >= suggestItems.length) return;
       const item = suggestItems[index];
-      const input = document.getElementById("input");
+      const input = $["input"];
       input.value = item.text;
       closeSuggest();
       if (item.kind === "item" && item.id) { enterEditMode(item.id, item.item_type); }
@@ -1103,9 +1074,9 @@
     function enterEditMode(itemId, itemType) {
       editItemId = itemId;
       editItemType = itemType || null;
-      const row = document.getElementById("input-row");
-      const icon = document.getElementById("input-icon");
-      const input = document.getElementById("input");
+      const row = $["input-row"];
+      const icon = $["input-icon"];
+      const input = $["input"];
       row.classList.add("edit-mode");
       icon.textContent = "✎";
       input.focus();
@@ -1115,9 +1086,9 @@
     function exitEditMode() {
       editItemId = null;
       editItemType = null;
-      const row = document.getElementById("input-row");
-      const icon = document.getElementById("input-icon");
-      const input = document.getElementById("input");
+      const row = $["input-row"];
+      const icon = $["input-icon"];
+      const input = $["input"];
       row.classList.remove("edit-mode");
       icon.textContent = "›";
       input.value = "";
@@ -1138,7 +1109,7 @@
     function liveSuggestFilter() {
       clearTimeout(suggestDebounce);
       suggestDebounce = setTimeout(async () => {
-        const query = document.getElementById("input").value;
+        const query = $["input"].value;
         const suggestions = await fetchSuggestions(query);
         renderSuggestions(suggestions);
       }, 150);
@@ -1155,7 +1126,7 @@
     }
 
     async function handleEditAction() {
-      const input = document.getElementById("input");
+      const input = $["input"];
       const text = input.value.trim();
       if (!text && !editItemId) return;
 
@@ -1166,32 +1137,31 @@
       clearResponse();
       showSpinner();
 
+      const ok = (icon, msg) => setResponse(
+        `<div class="msg msg-success"><span class="check">${icon}</span><span>${msg}</span></div>`
+      );
+
       try {
-        switch (parsed.action) {
-          case "delete":
-            await deleteItem(itemId);
-            setResponse(`<div class="msg msg-success"><span class="check">✓</span><span>Deleted.</span></div>`);
-            break;
-          case "retype": {
-            const fields = { type: parsed.type };
-            if (parsed.type === "todo") fields.status = "pending";
-            await patchItem(itemId, fields);
-            setResponse(`<div class="msg msg-success"><span class="check">✓</span><span>Retyped to ${esc(parsed.type)}.</span></div>`);
-            break;
-          }
-          case "done":
-            await patchItem(itemId, { status: "done" });
-            setResponse(`<div class="msg msg-success"><span class="check">✓</span><span>Marked as done.</span></div>`);
-            break;
-          case "undone":
-            await patchItem(itemId, { status: "pending" });
-            setResponse(`<div class="msg msg-success"><span class="check">↩</span><span>Reopened.</span></div>`);
-            break;
-          default:
-            await patchItem(itemId, { content: parsed.content });
-            setResponse(`<div class="msg msg-success"><span class="check">✓</span><span>Updated.</span></div>`);
+        if (parsed.action === "delete") {
+          await deleteItem(itemId);
+          ok("✓", "Deleted.");
+        } else if (parsed.action === "retype") {
+          const fields = { type: parsed.type };
+          if (parsed.type === "todo") fields.status = "pending";
+          await patchItem(itemId, fields);
+          ok("✓", `Retyped to ${esc(parsed.type)}.`);
+        } else if (parsed.action === "done") {
+          await patchItem(itemId, { status: "done" });
+          ok("✓", "Marked as done.");
+        } else if (parsed.action === "undone") {
+          await patchItem(itemId, { status: "pending" });
+          ok("↩", "Reopened.");
+        } else {
+          await patchItem(itemId, { content: parsed.content });
+          ok("✓", "Updated.");
         }
         loadInputRecent();
+        setTimeout(clearResponse, 1500);
       } catch (err) {
         setResponse(renderError(err.message));
       } finally {
@@ -1207,7 +1177,7 @@
     /* ── event handling ─────────────────────────────── */
 
     async function handleSubmit() {
-      const input = document.getElementById("input");
+      const input = $["input"];
       const text = input.value.trim();
       if (!text) return;
 
@@ -1222,6 +1192,9 @@
         const result = await postInput(text);
         setResponse(renderResponse(result));
         loadInputRecent();
+        if (TRANSIENT_ACTIONS.has(result.action)) {
+          setTimeout(clearResponse, 1500);
+        }
       } catch (err) {
         const isDaemonDown = err.message.includes("fetch") || err.message.includes("network");
         const msg = isDaemonDown ? "Cannot reach daemon at " + DAEMON + ". Is it running?" : err.message;
@@ -1240,7 +1213,7 @@
       if (e.key === "Tab") {
         e.preventDefault();
         if (suggestOpen) { closeSuggest(); }
-        else { fetchSuggestions(document.getElementById("input").value).then(renderSuggestions); }
+        else { fetchSuggestions($["input"].value).then(renderSuggestions); }
         return;
       }
 
@@ -1259,10 +1232,10 @@
       }
 
       if (editItemId) {
-        if (e.key === "Enter" && e.shiftKey) { e.preventDefault(); copyToClipboard(document.getElementById("input").value); exitEditMode(); return; }
+        if (e.key === "Enter" && e.shiftKey) { e.preventDefault(); copyToClipboard($["input"].value); exitEditMode(); return; }
         if (e.key === "Enter") { e.preventDefault(); handleEditAction(); return; }
         if (e.key === "ArrowLeft") {
-          const input = document.getElementById("input");
+          const input = $["input"];
           if (input.selectionStart === 0 && input.selectionEnd === 0) { e.preventDefault(); input.setSelectionRange(0, 0); }
           return;
         }
@@ -1277,12 +1250,13 @@
     /* ── init ────────────────────────────────────────── */
 
     document.addEventListener("DOMContentLoaded", () => {
+      cacheDOM();
       applyTheme(savedTheme());
 
-      document.getElementById("input").addEventListener("keydown", handleKeydown);
-      document.getElementById("input").addEventListener("input", () => { if (suggestOpen) liveSuggestFilter(); });
+      $["input"].addEventListener("keydown", handleKeydown);
+      $["input"].addEventListener("input", () => { if (suggestOpen) liveSuggestFilter(); });
 
-      document.getElementById("suggest-dropdown").addEventListener("click", (e) => {
+      $["suggest-dropdown"].addEventListener("click", (e) => {
         const item = e.target.closest(".suggest-item");
         if (item) selectSuggestion(parseInt(item.dataset.index, 10));
       });
@@ -1293,7 +1267,7 @@
         tab.addEventListener("click", () => switchView(tab.dataset.view));
       });
 
-      document.getElementById("todo-list").addEventListener("click", (e) => {
+      $["todo-list"].addEventListener("click", (e) => {
         const row = e.target.closest(".todo-row");
         if (row && !row.querySelector(".completing")) completeTodo(row);
       });
@@ -1301,7 +1275,7 @@
       document.getElementById("todo-refresh").addEventListener("click", loadTodos);
       document.getElementById("recent-refresh").addEventListener("click", loadRecent);
 
-      document.getElementById("input-recent").addEventListener("click", (e) => {
+      $["input-recent"].addEventListener("click", (e) => {
         const row = e.target.closest(".input-recent-row");
         if (!row) return;
 
