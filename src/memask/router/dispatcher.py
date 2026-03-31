@@ -3,10 +3,13 @@ import re
 from dataclasses import dataclass, field
 from typing import Any
 
+import numpy as np
+
 from memask.context import ServiceContext
 from memask.models.item import Item
 from memask.rag.pipeline import answer_question
 from memask.repository.items import create_item, list_items, update_item, soft_delete_item
+from memask.router.action_resolution import resolve_update
 from memask.router.intents import Intent
 from memask.router.query_refinement import needs_refinement, refine_search_query
 from memask.router.router import route
@@ -43,6 +46,7 @@ def dispatch(svc: ServiceContext, text: str) -> DispatchResult:
         Intent.TODO_LIST: _handle_todo_list,
         Intent.TODO_COMPLETE: _handle_todo_complete,
         Intent.TODO_DELETE: _handle_todo_delete,
+        Intent.TODO_UPDATE: _handle_todo_update,
         Intent.APP_COMMAND: _handle_app_command,
     }
 
@@ -170,14 +174,23 @@ def _handle_todo_list(svc, text, routing):
 
 def _handle_todo_complete(svc, text, routing):
     search_text = _extract_complete_query(text)
-    if not search_text:
+
+    if not search_text and svc.embedder is None:
         return DispatchResult(
             action="todo_not_found",
             data={"message": "Specify which todo to complete."},
         )
 
     todos = list_items(svc.conn, type="todo", status="pending")
-    matches = _find_todos(search_text, todos)
+
+    if search_text:
+        matches = _find_todos(search_text, todos)
+        if len(matches) == 0 and svc.embedder is not None:
+            matches = _find_todos_semantic(search_text, todos, svc.embedder)
+    elif svc.embedder is not None:
+        matches = _find_todos_semantic(text.strip(), todos, svc.embedder)
+    else:
+        matches = []
 
     if len(matches) == 0:
         return DispatchResult(action="todo_not_found")
@@ -233,6 +246,51 @@ def _handle_todo_delete(svc, text, routing):
         },
         items=list(matches),
     )
+
+
+def _handle_todo_update(svc, text, routing):
+    search_text, new_content = _extract_update_parts(text)
+
+    todos = list_items(svc.conn, type="todo", status="pending")
+    if not todos:
+        return DispatchResult(action="todo_not_found")
+
+    matches = _find_todos(search_text, todos) if search_text else []
+
+    if len(matches) == 1 and new_content:
+        updated = update_item(svc.conn, matches[0].id, content=new_content)
+        return DispatchResult(
+            action="todo_updated",
+            data={"id": updated.id, "content": updated.content},
+            item=updated,
+        )
+
+    candidates = matches if matches else todos
+
+    llm = svc.llm
+    llm_available = llm is not None and llm.is_available()
+
+    if llm_available:
+        plan = resolve_update(text, candidates, llm)
+        if plan:
+            updated = update_item(svc.conn, plan.target_id, content=plan.new_content)
+            return DispatchResult(
+                action="todo_updated",
+                data={"id": updated.id, "content": updated.content},
+                item=updated,
+            )
+
+    if matches:
+        return DispatchResult(
+            action="todo_ambiguous",
+            data={
+                "message": f"Multiple todos match '{search_text}':",
+                "matches": [{"id": t.id, "content": t.content} for t in matches],
+            },
+            items=list(matches),
+        )
+
+    return DispatchResult(action="todo_not_found")
 
 
 def _handle_app_command(svc, text, routing):
@@ -383,6 +441,7 @@ def _handle_help():
         ("finished X", "Mark todo X as done"),
         ("remove X from my todos", "Delete todo X"),
         ("what's on my todo list?", "List pending todos"),
+        ("change X to Y", "Update a todo"),
     ]
     return DispatchResult(
         action="help",
@@ -548,6 +607,23 @@ def _extract_delete_query(text: str) -> str:
     return ""
 
 
+UPDATE_PATTERNS = [
+    re.compile(r"^(?:change|update)\s+(?:the\s+)?(.+?)\s+(?:todo\s+)?to\s+(.+)$", re.I),
+    re.compile(r"^reschedule\s+(?:the\s+)?(.+?)\s+to\s+(.+)$", re.I),
+    re.compile(r"^rename\s+(?:the\s+)?(.+?)\s+to\s+(.+)$", re.I),
+    re.compile(r"^set\s+(?:the\s+)?(.+?)\s+to\s+(.+)$", re.I),
+]
+
+
+def _extract_update_parts(text: str) -> tuple[str | None, str | None]:
+    stripped = text.strip()
+    for pattern in UPDATE_PATTERNS:
+        match = pattern.match(stripped)
+        if match:
+            return match.group(1).strip(), match.group(2).strip()
+    return stripped, None
+
+
 def _extract_undone_query(text: str) -> str:
     m = re.match(r"^/undone\s+(.+)$", text.strip(), re.I)
     return m.group(1).strip() if m else ""
@@ -577,6 +653,35 @@ def _find_todos(query: str, todos: list[Item]) -> list[Item]:
 def _find_todo(query: str, todos: list[Item]) -> Item | None:
     matches = _find_todos(query, todos)
     return matches[0] if len(matches) == 1 else None
+
+
+def _find_todos_semantic(
+    query: str,
+    todos: list[Item],
+    embedder,
+    threshold: float = 0.5,
+) -> list[Item]:
+    if not todos or embedder is None:
+        return []
+
+    query_vec = np.asarray(embedder.embed_one(query), dtype=np.float32)
+    todo_texts = [t.content for t in todos]
+    todo_vecs = np.asarray(embedder.embed_many(todo_texts), dtype=np.float32)
+
+    scores = _cosine_similarities(query_vec, todo_vecs)
+    best_idx = int(np.argmax(scores))
+    best_score = float(scores[best_idx])
+
+    if best_score >= threshold:
+        return [todos[best_idx]]
+    return []
+
+
+def _cosine_similarities(query_vec, candidate_vecs):
+    query_norm = query_vec / (np.linalg.norm(query_vec) + 1e-9)
+    norms = np.linalg.norm(candidate_vecs, axis=1, keepdims=True) + 1e-9
+    normalized = candidate_vecs / norms
+    return normalized @ query_norm
 
 
 def _split_multi_todo(content: str) -> list[str]:

@@ -67,6 +67,14 @@ NL_DELETION = re.compile(
     re.I,
 )
 
+NL_UPDATE = re.compile(
+    r"(?:^(?:change|update)\s+(?:the\s+)?.+\s+(?:todo\s+)?to\s+"
+    r"|^reschedule\s+(?:the\s+)?.+\s+to\s+"
+    r"|^rename\s+(?:the\s+)?.+\s+to\s+"
+    r"|^set\s+the\s+.+\s+(?:todo\s+)?to\s+)",
+    re.I,
+)
+
 NL_TODO_LIST = re.compile(
     r"(?:^what(?:'s| is)\s+on\s+my\s+(?:todo\s+)?list"
     r"|^show\s+(?:me\s+)?my\s+(?:todos?|tasks?)"
@@ -134,6 +142,9 @@ def classify_by_rules(text: str) -> RoutingResult:
     if NL_HELP.match(stripped):
         return _result(Intent.APP_COMMAND, Confidence.MEDIUM, text, ctx)
 
+    if NL_UPDATE.match(stripped):
+        return _result(Intent.TODO_UPDATE, Confidence.MEDIUM, text, ctx)
+
     if NL_COMPLETION.search(stripped):
         return _result(Intent.TODO_COMPLETE, Confidence.MEDIUM, text, ctx)
 
@@ -164,11 +175,11 @@ def _has_query_signals(text: str) -> bool:
     return any(re.search(p, lower) for p in query_signals)
 
 
-def _result(intent, confidence, raw_input, query_context):
+def _result(intent, confidence, raw_input, ctx):
     return RoutingResult(
         intent=intent,
         confidence=confidence,
-        query_context=query_context,
+        query_context=ctx,
         raw_input=raw_input,
         source="rules",
     )
