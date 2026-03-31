@@ -11,6 +11,7 @@ from memask.rag.pipeline import answer_question
 from memask.repository.items import create_item, list_items, update_item, soft_delete_item
 from memask.router.action_resolution import resolve_update
 from memask.router.intents import Intent
+from memask.router.instruction_handler import handle_instruction_command
 from memask.router.query_refinement import needs_refinement, refine_search_query
 from memask.router.router import route
 from memask.search.hybrid import hybrid_search
@@ -107,6 +108,7 @@ def _handle_search(svc, text, routing):
         llm=svc.llm,
         reranker=svc.reranker,
         session_history=session_history,
+        instructions=_load_instruction_texts(svc),
     )
 
     if answer.synthesized:
@@ -304,6 +306,7 @@ def _handle_app_command(svc, text, routing):
         "undone": lambda: _handle_undone(svc, text),
         "help": lambda: _handle_help(),
         "status": lambda: _handle_status(svc),
+        "instruction": lambda: _handle_instruction(svc, text),
     }
 
     handler = command_handlers.get(command)
@@ -434,6 +437,10 @@ def _handle_help():
         ("/notes", "List recent notes"),
         ("/todos", "List pending todos"),
         ("/done", "List completed todos"),
+        ("/instruction <text>", "Save a persistent instruction"),
+        ("/instruction", "List active instructions"),
+        ("/instruction clear", "Clear all instructions"),
+        ("/instruction remove <id>", "Remove one instruction"),
         ("-1d", "Show everything from yesterday"),
         ("today", "Show everything from today"),
         ("!help", "Show this help"),
@@ -473,6 +480,20 @@ def _handle_status(svc):
             "jobs": jobs,
         },
     )
+
+
+def _handle_instruction(svc, text):
+    result = handle_instruction_command(svc.conn, text)
+    return DispatchResult(
+        action=result["action"],
+        data=result.get("data", {}),
+    )
+
+
+def _load_instruction_texts(svc) -> list[str]:
+    from memask.repository.instructions import list_active_instructions
+    active = list_active_instructions(svc.conn)
+    return [i["content"] for i in active]
 
 
 def _handle_date_list(svc, ctx):

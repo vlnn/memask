@@ -12,8 +12,11 @@ SYSTEM_MESSAGE = (
 )
 
 
-def build_system_message() -> str:
-    return SYSTEM_MESSAGE
+def build_system_message(instructions: list[str] | None = None) -> str:
+    if not instructions:
+        return SYSTEM_MESSAGE
+    prefs = "\n".join(f"- {i}" for i in instructions)
+    return f"User preferences:\n{prefs}\n\n{SYSTEM_MESSAGE}"
 
 
 def build_answer_prompt(

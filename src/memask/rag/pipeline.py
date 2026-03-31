@@ -27,6 +27,7 @@ def answer_question(
     llm: LLM | None = None,
     reranker: Reranker | None = None,
     session_history: list[dict[str, str]] | None = None,
+    instructions: list[str] | None = None,
     top_n: int = 5,
     max_context_chars: int = 4000,
 ) -> AnswerResult:
@@ -42,7 +43,7 @@ def answer_question(
         )
 
     prompt = build_answer_prompt(query, context, session_history=session_history)
-    system = build_system_message()
+    system = build_system_message(instructions=instructions)
     answer = llm.generate(prompt, system=system)
 
     return AnswerResult(

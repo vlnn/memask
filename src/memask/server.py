@@ -38,6 +38,12 @@ def create_app(app_context: AppContext) -> Flask:
     app.add_url_rule("/search", view_func=_search, methods=["GET"])
     app.add_url_rule("/suggest", view_func=_suggest, methods=["GET"])
     app.add_url_rule("/settings", view_func=_settings, methods=["GET"])
+    app.add_url_rule("/instructions", view_func=_get_instructions, methods=["GET"])
+    app.add_url_rule(
+        "/instructions/<instruction_id>",
+        view_func=_delete_instruction,
+        methods=["DELETE"],
+    )
 
     return app
 
@@ -178,6 +184,24 @@ def _delete_item(item_id):
 
 def _settings():
     return jsonify({})
+
+
+def _get_instructions():
+    from memask.repository.instructions import list_active_instructions
+
+    svc = _get_svc()
+    instructions = list_active_instructions(svc.conn)
+    return jsonify(instructions)
+
+
+def _delete_instruction(instruction_id):
+    from memask.repository.instructions import deactivate_instruction
+
+    svc = _get_svc()
+    removed = deactivate_instruction(svc.conn, instruction_id)
+    if not removed:
+        return jsonify({"error": "not found"}), 404
+    return jsonify({"status": "deactivated", "id": instruction_id})
 
 
 def _serialize_item(item):
